@@ -1,18 +1,31 @@
-version: '3.8'
+version: "3.8"
 
 services:
   postgres:
     image: postgres:15
     container_name: tikkit-postgres
+    restart: unless-stopped
+
+    # .env 파일의 변수를 Compose가 읽어서 아래 환경에 주입
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    # 호스트 포트는 DB_PORT를 사용 (없으면 5432 기본값)
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
+
     volumes:
       - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:

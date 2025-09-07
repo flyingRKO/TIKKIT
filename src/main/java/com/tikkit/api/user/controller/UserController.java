@@ -1,5 +1,6 @@
 package com.tikkit.api.user.controller;
 
+import com.tikkit.api.global.exception.ErrorCode;
 import com.tikkit.api.global.response.ApiResponse;
 import com.tikkit.api.user.dto.UserRegisterRequest;
 import com.tikkit.api.user.dto.UserResponse;
@@ -37,15 +38,22 @@ public class UserController {
 
     @GetMapping("/check-email")
     public ResponseEntity<ApiResponse<UserEmailCheckResponse>> checkEmailDuplicate(@RequestParam String email) {
+        // ⚠️ 형식/필수값 검증은 UserValidator 또는 Service에서 수행(예외 발생 시 GlobalExceptionHandler가 처리)
         boolean exists = userService.isEmailDuplicated(email);
+
         if (exists) {
+            // 중복: 200 OK + success=false + ErrorCode (data=null)
             return ResponseEntity.ok(
-                ApiResponse.success("이미 사용 중인 이메일입니다.", new UserEmailCheckResponse(false))
-            );
-        } else {
-            return ResponseEntity.ok(
-                ApiResponse.success("사용 가능한 이메일입니다.", new UserEmailCheckResponse(true))
+                    ApiResponse.<UserEmailCheckResponse>fail(
+                            ErrorCode.DUPLICATE_EMAIL.getCode(),
+                            ErrorCode.DUPLICATE_EMAIL.getMessage()
+                    )
             );
         }
+
+        // 사용 가능: 200 OK + success=true + data(available=true)
+        return ResponseEntity.ok(
+                ApiResponse.success(new UserEmailCheckResponse(true))
+        );
     }
 }

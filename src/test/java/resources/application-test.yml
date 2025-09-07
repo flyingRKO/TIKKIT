@@ -1,0 +1,16 @@
+spring:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: create-drop   # 테스트는 매 실행 깨끗하게
+    properties:
+      hibernate:
+        format_sql: true
+  sql:
+    init:
+      mode: never             # 꼭 필요하면 always
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.hibernate.type.descriptor.sql.BasicBinder: trace

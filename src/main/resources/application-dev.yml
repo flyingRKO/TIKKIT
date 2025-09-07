@@ -1,14 +1,37 @@
+server:
+  port: 8080
+
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/tikkit_db
-    username: tikkit_user
-    password: tikkit_pass
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${POSTGRES_DB:tikkit_db}
+    username: ${POSTGRES_USER:tikkit_user}
+    password: ${POSTGRES_PASSWORD:tikkit_pass}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop   # dev 전용: 실행 시 생성, 종료 시 드랍
+    defer-datasource-initialization: true  # Hibernate가 테이블 만든 뒤 SQL 초기화 실행
     properties:
       hibernate:
         format_sql: true
-    show-sql: true
+        jdbc:
+          time_zone: Asia/Seoul
+
+  sql:
+    init:
+      mode: always            # data.sql / data-postgresql.sql 실행
+      platform: postgresql    # data-postgresql.sql 사용 시
+
+  jackson:
+    time-zone: Asia/Seoul
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.hibernate.type.descriptor.sql.BasicBinder: trace
