@@ -9,7 +9,7 @@
 ## 기본 구조
 
 ```java
-class ReservationApiIntegrationTest extends AbstractIntegrationTest {
+class ReservationApiIntegrationTest extends AbstractContainerTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -29,7 +29,7 @@ class ReservationApiIntegrationTest extends AbstractIntegrationTest {
 
 ## 규칙
 
-- `@SpringBootTest` + `MockMvc`(또는 `webEnvironment = RANDOM_PORT` + `WebTestClient`) + Testcontainers PostgreSQL을 쓴다. `repository.md`와 같은 베이스 클래스 계열을 재사용한다.
+- `AbstractContainerTest`가 이미 `@SpringBootTest` + Testcontainers PostgreSQL을 갖추고 있으므로, `MockMvc`만 `@Autowired`로 주입받아 쓴다. `repository.md`와 같은 베이스 클래스를 그대로 재사용한다.
 - 이 계층에서 함께 확인해야 컨트롤러 단독 테스트가 필요 없어지는 항목:
   - 요청 검증(`@Valid`)이 400을 반환하는지
   - 인증/인가(`Authorization` 헤더 누락·타인 리소스 접근)가 401/403/404로 매핑되는지

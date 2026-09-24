@@ -6,9 +6,11 @@ spring:
     driver-class-name: org.postgresql.Driver
 
   jpa:
-    hibernate:
-      ddl-auto: update
     properties:
       hibernate:
         format_sql: true
     show-sql: true
+
+  # dev 프로필에서만 db/seed(개발용 시드 데이터)를 함께 로드한다.
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed

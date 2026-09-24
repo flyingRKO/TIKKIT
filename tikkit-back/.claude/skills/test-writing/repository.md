@@ -4,10 +4,10 @@
 
 ## 기본 구조
 
-Task 002에서 만드는 공통 Testcontainers 베이스 클래스를 상속한다(새로 만들지 않는다).
+`com.tikkit.api.support.AbstractContainerTest`(Task 002에서 만든 공통 Testcontainers 베이스 클래스)를 상속한다(새로 만들지 않는다).
 
 ```java
-class TicketGradeRepositoryTest extends AbstractRepositoryTest {
+class TicketGradeRepositoryTest extends AbstractContainerTest {
 
     @Autowired
     private TicketGradeRepository ticketGradeRepository;

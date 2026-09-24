@@ -1,18 +1,8 @@
+# 데이터소스는 AbstractContainerTest가 Testcontainers PostgreSQL로 동적 주입한다.
+# ddl-auto(validate)와 flyway locations는 application.yml의 공통 설정을 그대로 쓴다 (seed 미포함).
 spring:
-  datasource:
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-
   jpa:
-    hibernate:
-      ddl-auto: create-drop
     properties:
       hibernate:
         format_sql: true
     show-sql: true
-
-  h2:
-    console:
-      enabled: true

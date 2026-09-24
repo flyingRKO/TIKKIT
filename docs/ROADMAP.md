@@ -41,12 +41,12 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `.claude/agents/development-planner.md`의 기술 스택 표를 Java 17 → 21로 수정
   - ✅ `tikkit-back/.env.example` 추가 (`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`), `docker-compose.yml`·`application-dev.yml`과 값 일치 확인
   - ✅ 루트 README 골격 작성 (개요, 실행 방법, 문서 링크)
-- **Task 002: [BE] 백엔드 공통 기반 구축** - 우선순위
-  - Flyway 도입, `ddl-auto: validate`로 전환, `db/migration`(스키마)과 `db/seed`(dev 시드) 위치 분리
-  - 테스트 프로필을 H2에서 Testcontainers PostgreSQL로 전환 (공통 베이스 테스트 클래스)
-  - `ApiResponse<T>`, `PageResponse<T>`(Boot 3.3+의 `PageImpl` 직렬화 경고 회피), `ErrorCode` enum, `BusinessException`, `GlobalExceptionHandler` 추가
-  - `BaseTimeEntity`(JPA Auditing), `JPAQueryFactory` 빈, CORS(`localhost:3000` 허용) 설정
-  - `spring-restdocs-mockmvc` 의존성 제거 (springdoc으로 문서화 방식 통일)
+- **Task 002: [BE] 백엔드 공통 기반 구축** ✅ - 완료
+  - ✅ Flyway 도입, `ddl-auto: validate`로 전환, `db/migration`(스키마)과 `db/seed`(dev 시드) 위치 분리
+  - ✅ 테스트 프로필을 H2에서 Testcontainers PostgreSQL로 전환 (공통 베이스 테스트 클래스 `AbstractContainerTest`)
+  - ✅ `ApiResponse<T>`, `PageResponse<T>`(Boot 3.3+의 `PageImpl` 직렬화 경고 회피), `ErrorCode` enum, `BusinessException`, `GlobalExceptionHandler` 추가
+  - ✅ `BaseTimeEntity`(JPA Auditing), `JPAQueryFactory` 빈, CORS(`localhost:3000` 허용) 설정
+  - ✅ `spring-restdocs-mockmvc` 의존성 제거 (springdoc으로 문서화 방식 통일)
 - **Task 003: [FE] 프론트 초기화 및 브랜드 디자인 시스템** - 우선순위
   - `starter-cleaner` 에이전트로 보일러플레이트 정리, `shadcn init` 실행
   - `globals.css`에 퍼플/핑크 브랜드 토큰 적용 (아래 "브랜드 디자인 토큰" 참조), next-themes로 class 기반 다크모드
@@ -242,4 +242,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 0 진행 중 (1/32 Tasks 완료)
+**📊 진행 상황**: Phase 0 진행 중 (2/32 Tasks 완료)
