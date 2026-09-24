@@ -47,11 +47,11 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `ApiResponse<T>`, `PageResponse<T>`(Boot 3.3+의 `PageImpl` 직렬화 경고 회피), `ErrorCode` enum, `BusinessException`, `GlobalExceptionHandler` 추가
   - ✅ `BaseTimeEntity`(JPA Auditing), `JPAQueryFactory` 빈, CORS(`localhost:3000` 허용) 설정
   - ✅ `spring-restdocs-mockmvc` 의존성 제거 (springdoc으로 문서화 방식 통일)
-- **Task 003: [FE] 프론트 초기화 및 브랜드 디자인 시스템** - 우선순위
-  - `starter-cleaner` 에이전트로 보일러플레이트 정리, `shadcn init` 실행
-  - `globals.css`에 퍼플/핑크 브랜드 토큰 적용 (아래 "브랜드 디자인 토큰" 참조), next-themes로 class 기반 다크모드
-  - 폰트를 Geist에서 Pretendard로 교체, `components/{ui,layout}`, `lib/api`, `types` 폴더 생성
-  - `.env.local.example` 추가 (`API_BASE_URL`)
+- **Task 003: [FE] 프론트 초기화 및 브랜드 디자인 시스템** ✅ - 완료
+  - ✅ 보일러플레이트 정리(기본 page.tsx/메타데이터/미사용 SVG 제거), `shadcn init` 실행 (base-nova 스타일)
+  - ✅ `globals.css`에 퍼플/핑크 브랜드 토큰 적용 (아래 "브랜드 디자인 토큰" 참조), next-themes로 class 기반 다크모드
+  - ✅ 폰트를 Geist에서 Pretendard로 교체, `components/{ui,layout}`, `lib/api`, `types` 폴더 생성
+  - ✅ `.env.local.example` 추가 (`API_BASE_URL`)
 - **Task 004: [공통] GitHub Actions CI 구성** - 우선순위
   - BE 잡: `./gradlew test` (Testcontainers는 ubuntu-latest에서 동작)
   - FE 잡: `npm ci`, `lint`, `tsc --noEmit`, `build`
@@ -242,4 +242,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 0 진행 중 (2/32 Tasks 완료)
+**📊 진행 상황**: Phase 0 진행 중 (3/32 Tasks 완료)
