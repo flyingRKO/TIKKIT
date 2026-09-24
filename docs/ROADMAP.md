@@ -52,10 +52,11 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `globals.css`에 퍼플/핑크 브랜드 토큰 적용 (아래 "브랜드 디자인 토큰" 참조), next-themes로 class 기반 다크모드
   - ✅ 폰트를 Geist에서 Pretendard로 교체, `components/{ui,layout}`, `lib/api`, `types` 폴더 생성
   - ✅ `.env.local.example` 추가 (`API_BASE_URL`)
-- **Task 004: [공통] GitHub Actions CI 구성** - 우선순위
-  - BE 잡: `./gradlew test` (Testcontainers는 ubuntu-latest에서 동작)
-  - FE 잡: `npm ci`, `lint`, `tsc --noEmit`, `build`
-  - PR 트리거 추가, README에 CI 배지 추가
+- **Task 004: [공통] GitHub Actions CI 구성** ✅ - 완료
+  - ✅ `.github/workflows/ci.yml`: BE 잡(`./gradlew test`, ubuntu-latest 내장 Docker로 Testcontainers 실행), FE 잡(`npm ci` → `lint` → `tsc --noEmit` → `build`)
+  - ✅ `pull_request`(main 대상) + `push`(main) 트리거, `concurrency`로 중복 실행 취소
+  - ✅ `tikkit-back/gradlew` 실행 권한 수정 (Linux 러너 `Permission denied` 방지)
+  - ✅ README에 CI 배지 추가
 
 ### Phase 1: 도메인 골격 및 API 계약
 
@@ -242,4 +243,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 0 진행 중 (3/32 Tasks 완료)
+**📊 진행 상황**: Phase 0 완료 (4/32 Tasks 완료)

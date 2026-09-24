@@ -1,10 +1,12 @@
 # TIKKIT
 
+[![CI](https://github.com/flyingRKO/TIKKIT/actions/workflows/ci.yml/badge.svg)](https://github.com/flyingRKO/TIKKIT/actions/workflows/ci.yml)
+
 단순한 예매 MVP에서 출발해 동시성·지정석·대기열·성능·운영을 단계적으로 개선하며, 매 단계를 재현 → 해결 → 수치로 증명하는 티켓 예매 서비스 (포트폴리오 프로젝트)
 
 ## 진행 상황
 
-**Phase 0 진행 중 (0/32 Task 완료)** — 아직 기능 구현 전, 문서화와 개발 환경 정리 단계입니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**Phase 0 완료 (4/32 Task 완료)** — 문서화·개발 환경·CI 정리가 끝났고, 다음 단계부터 도메인 로직 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 문서
 
