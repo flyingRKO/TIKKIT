@@ -35,12 +35,12 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 ### Phase 0: 기반 정비
 
-- **Task 001: [공통] 프로젝트 문서·설정 정합성 정리** - 우선순위
-  - `tikkit-back/CLAUDE.md`의 DB명(`tikkit_dev` → `tikkit_db`)과 Spring Security 설명("Task 008에서 도입 예정")을 실제 상태에 맞게 수정
-  - 루트 `CLAUDE.md`의 `/update-roadmap` 표기를 `/docs:update-roadmap`으로 수정, 문서 목록에 `docs/ERD.md`, `docs/improvements/` 추가
-  - `.claude/agents/development-planner.md`의 기술 스택 표를 Java 17 → 21로 수정
-  - `tikkit-back/.env.example` 추가 (`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`), `docker-compose.yml`·`application-dev.yml`과 값 일치 확인
-  - 루트 README 골격 작성 (개요, 실행 방법, 문서 링크)
+- **Task 001: [공통] 프로젝트 문서·설정 정합성 정리** ✅ - 완료
+  - ✅ `tikkit-back/CLAUDE.md`의 DB명(`tikkit_dev` → `tikkit_db`)과 Spring Security 설명("Task 008에서 도입 예정")을 실제 상태에 맞게 수정
+  - ✅ 루트 `CLAUDE.md`의 `/update-roadmap` 표기를 `/docs:update-roadmap`으로 수정, 문서 목록에 `docs/ERD.md`, `docs/improvements/` 추가
+  - ✅ `.claude/agents/development-planner.md`의 기술 스택 표를 Java 17 → 21로 수정
+  - ✅ `tikkit-back/.env.example` 추가 (`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`), `docker-compose.yml`·`application-dev.yml`과 값 일치 확인
+  - ✅ 루트 README 골격 작성 (개요, 실행 방법, 문서 링크)
 - **Task 002: [BE] 백엔드 공통 기반 구축** - 우선순위
   - Flyway 도입, `ddl-auto: validate`로 전환, `db/migration`(스키마)과 `db/seed`(dev 시드) 위치 분리
   - 테스트 프로필을 H2에서 Testcontainers PostgreSQL로 전환 (공통 베이스 테스트 클래스)
@@ -242,4 +242,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 0 진행 중 (0/32 Tasks 완료)
+**📊 진행 상황**: Phase 0 진행 중 (1/32 Tasks 완료)
