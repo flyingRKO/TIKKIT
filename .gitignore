@@ -1,0 +1,10 @@
+# Claude Code 개인 설정 (로컬 전용)
+.claude/settings.local.json
+
+# MCP 설정 (DB 접속문자열 등 자격증명 포함, 개인 환경별로 다름)
+.mcp.json
+
+# 환경 변수
+.env
+.env.local
+.env.*.local
