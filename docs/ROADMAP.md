@@ -60,11 +60,11 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 ### Phase 1: 도메인 골격 및 API 계약
 
-- **Task 005: [BE] MVP 스키마(V1) 및 JPA 엔티티**
-  - `V1__init_schema.sql` 작성 (`docs/ERD.md` MVP 스키마 참조, 테이블·컬럼 한국어 COMMENT 포함)
-  - venue, member, performance, schedule, ticket_grade, reservation, payment 엔티티 및 리포지토리 작성
-  - `V1_1__seed_dev_data.sql`: venue 시드 → 공연 8개(각 venue 참조) × 회차 2~4개 × VIP/R/S 등급, 테스트 계정, 판매 오픈 시점 다양화 (dev 프로필에서만 로드)
-  - 매핑 테스트 작성 (Testcontainers)
+- **Task 005: [BE] MVP 스키마(V1) 및 JPA 엔티티** ✅ - 완료
+  - ✅ `V1__init_schema.sql` 작성 (venues~payments 7개 테이블, ERD의 제약·인덱스·한국어 COMMENT 전부 반영)
+  - ✅ 5개 도메인 패키지(venue/member/performance/reservation/payment)에 엔티티·리포지토리 작성, 연관관계는 단방향 `@ManyToOne(LAZY)`만 사용
+  - ✅ `V1_1__seed_dev_data.sql`: venue 4곳 → 공연 8개 × 회차 2~4개 × VIP/R/S 등급(60건), 테스트 계정 2개, 판매중/오픈예정/판매종료 3그룹으로 상태 분산, `performances`의 파생 컬럼(status/start_date/end_date)을 schedules 기준으로 재계산
+  - ✅ Testcontainers 매핑 테스트: 이메일 대소문자 유니크, 예약~결제 그래프 왕복, 총액 CHECK 제약, 복합 FK 가드(ticket_grade_id·schedule_id)
 - **Task 006: [공통] API 계약 정의 및 springdoc 설정**
   - `springdoc-openapi-starter-webmvc-ui` 추가 (Boot 3.4 호환 버전 확인)
   - MVP 전 엔드포인트(부록 B, `docs/PRD.md` 참조)에 대한 컨트롤러 스텁과 요청/응답 DTO 작성
@@ -243,4 +243,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 0 완료 (4/32 Tasks 완료)
+**📊 진행 상황**: Phase 1 진행 중 (5/32 Tasks 완료)

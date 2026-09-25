@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**Phase 0 완료 (4/32 Task 완료)** — 문서화·개발 환경·CI 정리가 끝났고, 다음 단계부터 도메인 로직 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**Phase 1 진행 중 (5/32 Task 완료)** — MVP 스키마(V1)와 JPA 엔티티가 준비됐고, 도메인 API 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 문서
 
@@ -43,6 +43,13 @@ cp .env.example .env   # 최초 1회
 docker-compose up -d   # PostgreSQL 실행 (Docker Desktop 필요)
 ./gradlew bootRun       # http://localhost:8080
 ```
+
+기동 시 Flyway가 V1 스키마와 dev 시드 데이터를 자동 적용합니다. 테스트 계정(비밀번호 모두 `Password1!`):
+
+| 이메일 | 권한 |
+|---|---|
+| `user@tikkit.com` | USER |
+| `admin@tikkit.com` | ADMIN |
 
 ### 프론트엔드
 
