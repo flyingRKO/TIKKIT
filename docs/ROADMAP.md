@@ -70,11 +70,11 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 부록 B 전체 엔드포인트에 컨트롤러 스텁 + 요청/응답 DTO(record) 작성. 실제 로직은 각각 Task 008/009/012~013에서 연결 예정(주석으로 명시)
   - ✅ 에러 코드 표·공통 응답 포맷은 Task 002에서 이미 구현된 것을 그대로 사용
   - ✅ FE `types/api.ts`에 계약과 동일한 타입 수기 작성
-- **Task 007: [FE] 라우트 구조 및 공통 레이아웃**
-  - MVP 전 라우트(부록 A)에 대한 placeholder `page.tsx` 생성, `(main)`/`(auth)` 라우트 그룹 구성
-  - 헤더(로고 그라디언트, 로그인 상태), 푸터, 모바일 내비게이션 구현
-  - `loading.tsx`, `error.tsx`, `not-found.tsx` 작성
-  - `lib/api/client.ts`: `ApiResponse`를 언랩하고 타입화된 에러를 던지는 fetch 래퍼
+- **Task 007: [FE] 라우트 구조 및 공통 레이아웃** ✅ - 완료
+  - ✅ 부록 A 9개 라우트에 placeholder 페이지 생성, `(main)`(헤더+푸터)/`(auth)`(로고만) 라우트 그룹 구성
+  - ✅ 헤더(로고 그라디언트, 데스크톱 네비, 로그인 링크는 Task 011에서 실제 세션으로 교체 예정), 푸터, 모바일 내비게이션(`useState` 토글), 다크모드 토글(`useSyncExternalStore`로 하이드레이션 불일치 방지)
+  - ✅ 루트 `loading.tsx`/`error.tsx`/`not-found.tsx` 작성
+  - ✅ `lib/api/client.ts`: `ApiResponse`를 언랩하는 `apiFetch` + `ApiError` (Server Component/Action 전용, `NEXT_PUBLIC_` 미접두라 브라우저에서는 미사용)
 - **Task 008: [BE] 회원가입·로그인 (Spring Security + JWT)**
   - Spring Security, JJWT 도입, BCrypt 비밀번호, stateless `JwtAuthenticationFilter`
   - `/auth/signup`, `/auth/login`, `/members/me` 구현
@@ -243,4 +243,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 1 진행 중 (6/32 Tasks 완료)
+**📊 진행 상황**: Phase 1 진행 중 (7/32 Tasks 완료)

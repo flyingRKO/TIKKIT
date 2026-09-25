@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**Phase 1 진행 중 (6/32 Task 완료)** — API 계약(컨트롤러/DTO/springdoc)이 정의됐고, 실제 로직 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**Phase 1 진행 중 (7/32 Task 완료)** — API 계약과 프론트 라우트/공통 레이아웃이 준비됐고, 실제 화면·인증 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 문서
 
