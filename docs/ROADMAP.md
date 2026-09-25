@@ -65,11 +65,11 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 5개 도메인 패키지(venue/member/performance/reservation/payment)에 엔티티·리포지토리 작성, 연관관계는 단방향 `@ManyToOne(LAZY)`만 사용
   - ✅ `V1_1__seed_dev_data.sql`: venue 4곳 → 공연 8개 × 회차 2~4개 × VIP/R/S 등급(60건), 테스트 계정 2개, 판매중/오픈예정/판매종료 3그룹으로 상태 분산, `performances`의 파생 컬럼(status/start_date/end_date)을 schedules 기준으로 재계산
   - ✅ Testcontainers 매핑 테스트: 이메일 대소문자 유니크, 예약~결제 그래프 왕복, 총액 CHECK 제약, 복합 FK 가드(ticket_grade_id·schedule_id)
-- **Task 006: [공통] API 계약 정의 및 springdoc 설정**
-  - `springdoc-openapi-starter-webmvc-ui` 추가 (Boot 3.4 호환 버전 확인)
-  - MVP 전 엔드포인트(부록 B, `docs/PRD.md` 참조)에 대한 컨트롤러 스텁과 요청/응답 DTO 작성
-  - 에러 코드 표 및 공통 응답 포맷 정의
-  - FE `types/api.ts`에 계약과 동일한 타입 수기 작성
+- **Task 006: [공통] API 계약 정의 및 springdoc 설정** ✅ - 완료
+  - ✅ `springdoc-openapi-starter-webmvc-ui:2.8.6` 추가 (Boot 3.4용 2.x 계열 마지막 버전), `/swagger-ui.html`에서 11개 엔드포인트 확인
+  - ✅ 부록 B 전체 엔드포인트에 컨트롤러 스텁 + 요청/응답 DTO(record) 작성. 실제 로직은 각각 Task 008/009/012~013에서 연결 예정(주석으로 명시)
+  - ✅ 에러 코드 표·공통 응답 포맷은 Task 002에서 이미 구현된 것을 그대로 사용
+  - ✅ FE `types/api.ts`에 계약과 동일한 타입 수기 작성
 - **Task 007: [FE] 라우트 구조 및 공통 레이아웃**
   - MVP 전 라우트(부록 A)에 대한 placeholder `page.tsx` 생성, `(main)`/`(auth)` 라우트 그룹 구성
   - 헤더(로고 그라디언트, 로그인 상태), 푸터, 모바일 내비게이션 구현
@@ -243,4 +243,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 1 진행 중 (5/32 Tasks 완료)
+**📊 진행 상황**: Phase 1 진행 중 (6/32 Tasks 완료)

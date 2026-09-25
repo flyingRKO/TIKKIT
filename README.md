@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**Phase 1 진행 중 (5/32 Task 완료)** — MVP 스키마(V1)와 JPA 엔티티가 준비됐고, 도메인 API 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**Phase 1 진행 중 (6/32 Task 완료)** — API 계약(컨트롤러/DTO/springdoc)이 정의됐고, 실제 로직 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 문서
 

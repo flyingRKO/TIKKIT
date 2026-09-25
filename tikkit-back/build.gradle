@@ -48,6 +48,9 @@ dependencies {
     // MyBatis (통계/리포트/배치/벤더 특화 SQL용)
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.4'
 
+    // springdoc-openapi (Spring Boot 3.4용 2.x 계열 마지막 버전 - Boot 4용은 3.x 계열로 별도)
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.assertj:assertj-core:3.24.2'
     testImplementation 'org.mockito:mockito-core:5.8.0'
