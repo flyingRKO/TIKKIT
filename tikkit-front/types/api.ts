@@ -28,7 +28,9 @@ export type ErrorCode =
   | "BOOKING_NOT_OPEN"
   | "SOLD_OUT"
   | "RESERVATION_EXPIRED"
-  | "INVALID_STATUS_TRANSITION";
+  | "INVALID_STATUS_TRANSITION"
+  | "DUPLICATE_EMAIL"
+  | "INVALID_CREDENTIALS";
 
 // 회원 — 세션 기반 인증(Task 008). 로그인 성공 응답은 토큰이 아니라 회원 정보이며,
 // 실제 인증 상태는 BE가 내려주는 JSESSIONID 쿠키로 유지된다 (Task 011에서 Next 서버가 중계)
