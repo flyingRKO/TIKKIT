@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**Phase 1 완료, Phase 2 진행 중 (8/33 Task 완료)** — 도메인 골격·API 계약·세션 인증이 준비됐고, 공연 탐색 화면·API 구현을 시작합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**Phase 2 진행 중 (9/33 Task 완료)** — 세션 인증과 공연·회차 조회 API가 준비됐고, 이어서 관련 화면을 붙입니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 문서
 
