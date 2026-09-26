@@ -30,7 +30,8 @@ export type ErrorCode =
   | "RESERVATION_EXPIRED"
   | "INVALID_STATUS_TRANSITION";
 
-// 회원 (Task 008에서 실제 인증 연결)
+// 회원 — 세션 기반 인증(Task 008). 로그인 성공 응답은 토큰이 아니라 회원 정보이며,
+// 실제 인증 상태는 BE가 내려주는 JSESSIONID 쿠키로 유지된다 (Task 011에서 Next 서버가 중계)
 
 export type MemberRole = "USER" | "ADMIN";
 
@@ -50,12 +51,6 @@ export interface SignupResponse {
 export interface LoginRequest {
   email: string;
   password: string;
-}
-
-export interface LoginResponse {
-  accessToken: string;
-  tokenType: string;
-  expiresIn: number;
 }
 
 export interface MemberResponse {

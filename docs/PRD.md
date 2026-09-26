@@ -38,7 +38,7 @@ journey
 | F008 | 예매 취소 | PENDING/CONFIRMED 상태에서 취소, 전액 환불 처리 | 예매 상세 |
 | F009 | 선점 자동 만료 | 10분 경과 시 시스템이 자동으로 만료 처리 | (시스템) |
 | F010 | 회원가입 | 이메일/비밀번호 기반 가입 | 회원가입 |
-| F011 | 로그인·로그아웃 | JWT 기반 인증 | 로그인, 헤더 |
+| F011 | 로그인·로그아웃 | 세션 기반 인증(`HttpSession`), 서버 확장은 고도화 단계에서 다룸 | 로그인, 헤더 |
 | F012 | 다크모드 전환 | 라이트/다크 테마 토글 | 헤더 |
 
 ## 메뉴 구조
@@ -104,8 +104,9 @@ journey
 
 | Method | Path | 인증 | 비고 |
 |---|---|---|---|
-| POST | /auth/signup | – | |
-| POST | /auth/login | – | `{accessToken, tokenType, expiresIn}` 반환 |
+| POST | /auth/signup | – | 이메일 중복 시 409 `DUPLICATE_EMAIL` |
+| POST | /auth/login | – | 성공 시 `Set-Cookie: JSESSIONID`, 회원 정보(`MemberResponse`) 반환. 실패 시 401 `INVALID_CREDENTIALS` |
+| POST | /auth/logout | ✔ | 세션 무효화 |
 | GET | /members/me | ✔ | |
 | GET | /performances?category&keyword&status&page&size | – | PageResponse |
 | GET | /performances/{id} | – | 회차 목록 포함 |
@@ -117,13 +118,13 @@ journey
 | POST | /reservations/{id}/cancel | ✔ | → CANCELLED |
 
 - **에러 포맷**: `{success: false, code, message, errors: []}`
-- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `UNAUTHORIZED`(401), `FORBIDDEN`(403)
+- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401)
 - **소유권 검증**: 타인 소유 예약(`GET/POST /reservations/{id}/...`)에 접근하면 403이 아닌 404를 반환한다 — 존재 여부 자체를 노출하지 않기 위함이다.
 - API 계약이 구현되면(Task 006) springdoc(`/swagger-ui.html`)이 진실의 원천이 되고, 이 표는 요약으로만 유지한다.
 
 ## MVP 제외 범위
 
-관리자 기능 및 콘텐츠 CRUD, 실제 PG 연동, 지정석 좌석 선택, 대기열, 리프레시 토큰, 소셜 로그인, 이메일/휴대폰 인증, 쿠폰·할인, 부분 취소, 회원별 구매 수량 제한, 리뷰·찜하기, 알림(이메일/푸시), 검색 자동완성, 다국어(i18n), Redis 캐싱.
+관리자 기능 및 콘텐츠 CRUD, 실제 PG 연동, 지정석 좌석 선택, 대기열, JWT/리프레시 토큰, 소셜 로그인, 이메일/휴대폰 인증, 쿠폰·할인, 부분 취소, 회원별 구매 수량 제한, 리뷰·찜하기, 알림(이메일/푸시), 검색 자동완성, 다국어(i18n), Redis 캐싱.
 
 ## 향후 확장 테마
 

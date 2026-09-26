@@ -9,7 +9,7 @@
 | Spring Data JPA | - | ORM / 데이터 접근 레이어 |
 | QueryDSL | - | 타입 안전 동적 쿼리 |
 | MyBatis | 3.x | 통계/배치/벤더 특화 SQL |
-| Spring Security | - | 인증 및 인가 (ROADMAP Task 008에서 도입 예정, 현재 build.gradle에 미포함) |
+| Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
 | Spring Web | - | REST API |
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
 | Lombok | - | 보일러플레이트 코드 감소 |
@@ -89,7 +89,7 @@ Controller → Service → Repository → Entity
 
 - 민감한 데이터는 응답에 포함하지 않음
 - 모든 비밀번호는 BCrypt 암호화
-- JWT 토큰 기반 인증
+- 세션 기반 인증(`HttpSession`). 서버를 여러 대로 늘릴 때 생기는 세션 불일치와 JWT 전환 검토는 ROADMAP Task 026 참조
 - SQL Injection 방지 (JPA 파라미터 바인딩)
 
 ## Gradle 스크립트
