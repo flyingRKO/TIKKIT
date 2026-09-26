@@ -16,6 +16,10 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
 
+    // 회원 도메인
+    DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 가입된 이메일입니다."),
+    INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
+
     // 예매 도메인
     BOOKING_NOT_OPEN(HttpStatus.BAD_REQUEST, "아직 예매 가능한 시간이 아닙니다."),
     SOLD_OUT(HttpStatus.CONFLICT, "잔여 좌석이 없습니다."),
