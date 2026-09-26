@@ -16,7 +16,7 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 - 모든 테이블·컬럼에는 한국어 `COMMENT`를 단다(마이그레이션 SQL에 `COMMENT ON TABLE`/`COMMENT ON COLUMN`으로 포함). 아래 각 섹션의 SQL 블록이 실제로 쓸 문구다. 모든 테이블 공통인 `id`/`created_at`/`updated_at`은 여기서 한 번만 정의하고 개별 블록에서는 반복하지 않는다: `id IS '고유 식별자(PK)'`, `created_at IS '생성 일시'`, `updated_at IS '수정 일시'`.
 - 이메일처럼 대소문자를 구분하지 않아야 하는 유니크 컬럼은 `UNIQUE(lower(email))`로 선언한다(애플리케이션에서도 저장 전 소문자로 정규화).
 - 스키마는 Flyway로 관리하며 `ddl-auto: validate`를 사용한다. (`tikkit-back/CLAUDE.md`, Task 002)
-- 목록 조회의 복합 인덱스나 `pg_trgm` 기반 키워드 검색은 지금 미리 추가하지 않고 Task 027에서 `EXPLAIN ANALYZE` 근거로 결정한다. 참고로 `pg_trgm`은 3자 미만 패턴에는 인덱스를 타지 않아, 2음절 한글 제목(예: "햄릿") 검색에는 한계가 있다는 점을 그때 함께 검토한다.
+- 목록 조회의 복합 인덱스나 `pg_trgm` 기반 키워드 검색은 지금 미리 추가하지 않고 Task 028에서 `EXPLAIN ANALYZE` 근거로 결정한다. 참고로 `pg_trgm`은 3자 미만 패턴에는 인덱스를 타지 않아, 2음절 한글 제목(예: "햄릿") 검색에는 한계가 있다는 점을 그때 함께 검토한다.
 
 ### 의도적 비정규화
 

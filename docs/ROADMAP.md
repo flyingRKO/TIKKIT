@@ -14,17 +14,18 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 | 스키마 관리 | Flyway (flyway-core, flyway-database-postgresql) | Task 002 |
 | 테스트 DB | Testcontainers PostgreSQL (H2 대체) | Task 002 |
 | API 문서 | springdoc-openapi | Task 006 |
-| 인증 | Spring Security + JJWT | Task 008 |
-| 캐시/락/대기열 | Redis + Redisson | Task 020, 028, 030 |
+| 인증 | Spring Security (세션 기반, in-memory HttpSession) | Task 008 |
+| 캐시/락/대기열 | Redis + Redisson | Task 020, 029, 031 |
 | 모니터링 | Actuator + Micrometer + Prometheus + Grafana | Task 025 |
-| 부하 테스트 | k6 | Task 026 |
+| 세션 확장 검증 | Spring Session Data Redis vs JWT 비교 | Task 026 |
+| 부하 테스트 | k6 | Task 027 |
 | 프론트엔드 | Next.js 16.2.3, React 19.2.4, TypeScript 5, Tailwind v4 | 기존 |
 | UI | shadcn/ui, next-themes | Task 003 |
 | E2E | Playwright | Task 017 |
 
 ## 개발 워크플로우
 
-1. `/git:branch feature/task-NNN-slug`로 브랜치 생성
+1. `/git:branch feature/slug`로 브랜치 생성 (Task 번호는 넣지 않는다)
 2. 구현 및 테스트 작성
 3. `/git:commit` → `/git:pr`
 4. `/docs:update-roadmap`으로 완료 표시
@@ -75,9 +76,9 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 헤더(로고 그라디언트, 데스크톱 네비, 로그인 링크는 Task 011에서 실제 세션으로 교체 예정), 푸터, 모바일 내비게이션(`useState` 토글), 다크모드 토글(`useSyncExternalStore`로 하이드레이션 불일치 방지)
   - ✅ 루트 `loading.tsx`/`error.tsx`/`not-found.tsx` 작성
   - ✅ `lib/api/client.ts`: `ApiResponse`를 언랩하는 `apiFetch` + `ApiError` (Server Component/Action 전용, `NEXT_PUBLIC_` 미접두라 브라우저에서는 미사용)
-- **Task 008: [BE] 회원가입·로그인 (Spring Security + JWT)**
-  - Spring Security, JJWT 도입, BCrypt 비밀번호, stateless `JwtAuthenticationFilter`
-  - `/auth/signup`, `/auth/login`, `/members/me` 구현
+- **Task 008: [BE] 회원가입·로그인 (Spring Security, 세션 기반)**
+  - Spring Security 도입, BCrypt 비밀번호, 기본 세션(in-memory `HttpSession`) 방식으로 인증 — 서버가 1대인 MVP 단계에서는 JWT보다 구현이 단순하다. 다중 인스턴스로 확장할 때 생기는 문제와 대안(Redis 세션/JWT)은 Task 026에서 다룬다
+  - `/auth/signup`, `/auth/login`(로그인 성공 시 `JSESSIONID` 쿠키 발급), `/auth/logout`, `/members/me` 구현
   - `ApiResponse` 포맷을 따르는 401/403 핸들러
   - 서비스 단위 테스트 및 시큐리티 통합 테스트
 
@@ -95,9 +96,9 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - Task 009 이전에는 목업 데이터로 개발 후 실제 API 연동, 전 구간 로딩/에러 상태 처리
 - **Task 011: [FE] 인증 화면 및 세션 처리**
   - 로그인·회원가입 폼 (Server Action, 검증 메시지)
-  - 토큰을 httpOnly 쿠키에 저장, 서버 사이드 fetch에 `Authorization` 헤더 첨부
+  - 브라우저는 BE를 직접 호출하지 않으므로, Next 서버가 BE의 `Set-Cookie: JSESSIONID`를 받아 httpOnly 쿠키로 저장하고, 서버 사이드 `apiFetch`에서 그 쿠키를 BE로 그대로 중계
   - `proxy.ts`로 `/booking`, `/my` 보호, `?redirect=` 처리
-  - 로그아웃, 헤더의 로그인 상태 표시
+  - 로그아웃(`/auth/logout` 호출 + 쿠키 제거), 헤더의 로그인 상태 표시
 
 ### Phase 3: 예매·결제
 
@@ -179,40 +180,43 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 - **Task 025: [BE] 모니터링 구축**
   - Actuator + micrometer-prometheus 연동, compose에 Prometheus·Grafana 추가
   - 대시보드: HTTP p95, HikariCP 풀, JVM, 예매 성공/실패 카운터
-  - `v0.4.0-ops` 태그
+- **Task 026: [BE] 다중 인스턴스 세션 불일치 재현 및 개선**
+  - Task 024로 컨테이너화한 BE를 2개 인스턴스로 띄우고 로드밸런서(nginx 등) 뒤에 두어, 세션이 서버 메모리에만 있어 A 서버에서 로그인 후 B 서버로 요청이 가면 로그아웃되는 현상을 재현
+  - Redis 세션(Spring Session Data Redis)과 JWT(stateless) 두 가지 해결책을 각각 적용해보고, Task 025의 Grafana로 응답 지연을 비교하고 강제 로그아웃(권한 회수) 가능 여부·인프라 비용도 함께 따짐
+  - 최종 선택과 이유를 `docs/improvements/005-session-scaling.md`에 재현→해결→수치 형식으로 기록, `v0.4.0-ops` 태그
 
 ### Phase 8: 성능 개선
 
-- **Task 026: [공통] k6 부하 테스트 환경 및 베이스라인**
+- **Task 027: [공통] k6 부하 테스트 환경 및 베이스라인**
   - 대량 데이터 스크립트(`generate_series`로 공연 1,000개 × 회차당 좌석 약 2,000석, 전체 `schedule_seats` 약 600만 행 목표), dev 시드와 분리 관리
   - 시나리오: 탐색, 좌석 조회, 예매 스파이크
-  - 베이스라인 리포트(p95, TPS, 에러율 + Grafana 캡처), `docs/improvements/005-performance-baseline.md` 작성
-- **Task 027: [BE] 쿼리·인덱스 최적화**
+  - 베이스라인 리포트(p95, TPS, 에러율 + Grafana 캡처), `docs/improvements/006-performance-baseline.md` 작성
+- **Task 028: [BE] 쿼리·인덱스 최적화**
   - N+1 쿼리 탐지(SQL 로그/쿼리 카운트) 및 fetch join·`@BatchSize`·DTO 프로젝션으로 해결
   - `EXPLAIN ANALYZE` 기반 인덱스 추가(`V7__add_indexes.sql`)
-  - before/after 수치 기록, `docs/improvements/006-query-optimization.md` 작성
-- **Task 028: [BE] 캐싱 적용**
+  - before/after 수치 기록, `docs/improvements/007-query-optimization.md` 작성
+- **Task 029: [BE] 캐싱 적용**
   - Spring Cache + Redis로 공연 목록/상세 캐싱 (TTL, 변경 시 evict)
   - 좌석·잔여 수량은 캐싱 대상에서 제외하고 이유를 문서화
-  - before/after 수치 기록, `docs/improvements/007-caching.md` 작성
-- **Task 029: [FE] 렌더링 성능 개선**
+  - before/after 수치 기록, `docs/improvements/008-caching.md` 작성
+- **Task 030: [FE] 렌더링 성능 개선**
   - Lighthouse 베이스라인 측정
   - `next/image`, `revalidate`/`cacheLife`(Next 16 문서 확인 필요), Suspense 스트리밍 적용
-  - before/after 수치 기록, `docs/improvements/008-frontend-performance.md` 작성, `v0.5.0-performance` 태그
+  - before/after 수치 기록, `docs/improvements/009-frontend-performance.md` 작성, `v0.5.0-performance` 태그
 
 ### Phase 9: 대기열 시스템
 
-- **Task 030: [BE] Redis 대기열**
+- **Task 031: [BE] Redis 대기열**
   - ZSET(score = 입장 시각) 기반 대기열, ZRANK로 순번 계산
   - 스케줄러가 초당 N명씩 활성 세트로 입장시키고 TTL 토큰 발급
   - 좌석·예매 API에 토큰 검증 인터셉터 적용, `V8` 마이그레이션의 `queue_enabled` 플래그로 회차별 on/off
   - 순서·입장·만료 테스트
-- **Task 031: [FE] 대기열 화면**
+- **Task 032: [FE] 대기열 화면**
   - `/queue/[scheduleId]`: 순번, 예상 대기시간, 그라디언트 진행바
   - 2초 간격 폴링, 입장 시 자동 이동, 페이지 이탈 경고
-- **Task 032: [공통] 오픈런 부하 검증 및 최종 회고**
+- **Task 033: [공통] 오픈런 부하 검증 및 최종 회고**
   - 대기열 유무에 따른 k6 스파이크 비교 (DB 커넥션, 에러율, p95)
-  - `docs/improvements/009-waiting-queue.md`와 요약 인덱스 `docs/improvements/README.md` 작성
+  - `docs/improvements/010-waiting-queue.md`와 요약 인덱스 `docs/improvements/README.md` 작성
   - README 포트폴리오 섹션 마무리, `v1.0.0` 태그
 
 ## 브랜드 디자인 토큰 (Task 003 적용)
@@ -243,4 +247,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 1 진행 중 (7/32 Tasks 완료)
+**📊 진행 상황**: Phase 1 진행 중 (7/33 Tasks 완료)
