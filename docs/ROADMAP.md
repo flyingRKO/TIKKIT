@@ -59,7 +59,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `tikkit-back/gradlew` 실행 권한 수정 (Linux 러너 `Permission denied` 방지)
   - ✅ README에 CI 배지 추가
 
-### Phase 1: 도메인 골격 및 API 계약
+### Phase 1: 도메인 골격 및 API 계약 ✅
 
 - **Task 005: [BE] MVP 스키마(V1) 및 JPA 엔티티** ✅ - 완료
   - ✅ `V1__init_schema.sql` 작성 (venues~payments 7개 테이블, ERD의 제약·인덱스·한국어 COMMENT 전부 반영)
@@ -76,11 +76,11 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 헤더(로고 그라디언트, 데스크톱 네비, 로그인 링크는 Task 011에서 실제 세션으로 교체 예정), 푸터, 모바일 내비게이션(`useState` 토글), 다크모드 토글(`useSyncExternalStore`로 하이드레이션 불일치 방지)
   - ✅ 루트 `loading.tsx`/`error.tsx`/`not-found.tsx` 작성
   - ✅ `lib/api/client.ts`: `ApiResponse`를 언랩하는 `apiFetch` + `ApiError` (Server Component/Action 전용, `NEXT_PUBLIC_` 미접두라 브라우저에서는 미사용)
-- **Task 008: [BE] 회원가입·로그인 (Spring Security, 세션 기반)**
-  - Spring Security 도입, BCrypt 비밀번호, 기본 세션(in-memory `HttpSession`) 방식으로 인증 — 서버가 1대인 MVP 단계에서는 JWT보다 구현이 단순하다. 다중 인스턴스로 확장할 때 생기는 문제와 대안(Redis 세션/JWT)은 Task 026에서 다룬다
-  - `/auth/signup`, `/auth/login`(로그인 성공 시 `JSESSIONID` 쿠키 발급), `/auth/logout`, `/members/me` 구현
-  - `ApiResponse` 포맷을 따르는 401/403 핸들러
-  - 서비스 단위 테스트 및 시큐리티 통합 테스트
+- **Task 008: [BE] 회원가입·로그인 (Spring Security, 세션 기반)** ✅ - 완료
+  - ✅ Spring Security 도입, BCrypt 비밀번호, 기본 세션(in-memory `HttpSession`) 방식으로 인증 — 서버가 1대인 MVP 단계에서는 JWT보다 구현이 단순하다. 다중 인스턴스로 확장할 때 생기는 문제와 대안(Redis 세션/JWT)은 Task 026에서 다룬다
+  - ✅ `/auth/signup`, `/auth/login`(로그인 성공 시 `JSESSIONID` 쿠키 발급), `/auth/logout`, `/members/me` 구현
+  - ✅ `ApiResponse` 포맷을 따르는 401/403 핸들러
+  - ✅ 서비스 단위 테스트 및 시큐리티 통합 테스트
 
 ### Phase 2: 공연 탐색
 
@@ -246,5 +246,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-09-24
-**📊 진행 상황**: Phase 1 진행 중 (7/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-09-26
+**📊 진행 상황**: Phase 1 완료, Phase 2 진행 중 (8/33 Tasks 완료)
