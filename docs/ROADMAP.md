@@ -95,11 +95,13 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 상세 페이지: 포스터·정보, 회차/등급/수량 선택은 클라이언트 컴포넌트(`TicketSelector`)로 분리.
     실제 예매 API는 Task 012 이후라 "예매하기"는 비활성 처리
   - ✅ Task 009가 먼저 끝나 목업 없이 바로 실제 API 연동, 로딩(`loading.tsx`)·에러(`error.tsx`)·404(`notFound()`) 처리
-- **Task 011: [FE] 인증 화면 및 세션 처리**
-  - 로그인·회원가입 폼 (Server Action, 검증 메시지)
-  - 브라우저는 BE를 직접 호출하지 않으므로, Next 서버가 BE의 `Set-Cookie: JSESSIONID`를 받아 httpOnly 쿠키로 저장하고, 서버 사이드 `apiFetch`에서 그 쿠키를 BE로 그대로 중계
-  - `proxy.ts`로 `/booking`, `/my` 보호, `?redirect=` 처리
-  - 로그아웃(`/auth/logout` 호출 + 쿠키 제거), 헤더의 로그인 상태 표시
+- **Task 011: [FE] 인증 화면 및 세션 처리** ✅ - 완료
+  - ✅ 로그인·회원가입 폼 (`useActionState` 기반 Server Action, 검증 메시지). 가입과 로그인은 분리해서 가입 후엔
+    로그인 화면으로 보낸다(`?redirect=` 유지)
+  - ✅ 브라우저는 BE를 직접 호출하지 않으므로, Next 서버가 BE의 `Set-Cookie: JSESSIONID`를 받아 httpOnly 쿠키로 저장하고, 서버 사이드 `apiFetch`에서 그 쿠키를 BE로 그대로 중계
+  - ✅ `proxy.ts`(Next 16에서 `middleware.ts`가 이 이름으로 바뀜)로 `/booking`, `/my` 보호, `?redirect=` 처리 —
+    쿠키 존재 여부만 보는 낙관적 확인이고 실제 유효성은 항상 BE가 401로 판단
+  - ✅ 로그아웃(`/auth/logout` 호출 + 쿠키 제거), 헤더의 로그인 상태 표시(데스크톱/모바일 모두)
 
 ### Phase 3: 예매·결제
 
@@ -248,4 +250,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-09-26
-**📊 진행 상황**: Phase 2 진행 중 (10/33 Tasks 완료)
+**📊 진행 상황**: Phase 2 진행 중 (11/33 Tasks 완료)

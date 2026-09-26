@@ -1,13 +1,19 @@
 import Link from "next/link";
+import { AuthStatus } from "@/components/layout/auth-status";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { getMe } from "@/lib/api/auth";
 
 const NAV_ITEMS = [
   { href: "/performances", label: "공연 목록" },
   { href: "/my/reservations", label: "마이페이지" },
 ];
 
-export function Header() {
+// 로그인 상태를 보여주려고 매 요청마다 BE에 /members/me를 한 번 물어본다. 이 프로젝트에 아직 세션 캐시가
+// 없어서(그런 캐시를 두면 로그아웃/만료가 늦게 반영될 수 있음) 정확성을 우선한 선택이다 — 캐싱은 Task 028 몫.
+export async function Header() {
+  const member = await getMe();
+
   return (
     <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
@@ -28,19 +34,13 @@ export function Header() {
               {item.label}
             </Link>
           ))}
-          {/* 로그인 상태 표시는 Task 011에서 실제 세션 값으로 교체한다 */}
-          <Link
-            href="/login"
-            className="text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            로그인
-          </Link>
+          <AuthStatus member={member} />
           <ThemeToggle />
         </nav>
 
         <div className="flex items-center gap-1 md:hidden">
           <ThemeToggle />
-          <MobileNav items={[...NAV_ITEMS, { href: "/login", label: "로그인" }]} />
+          <MobileNav items={NAV_ITEMS} authSlot={<AuthStatus member={member} />} />
         </div>
       </div>
     </header>

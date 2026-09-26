@@ -1,3 +1,4 @@
+import { getSessionCookie, SESSION_COOKIE_NAME } from "@/lib/session";
 import type { ApiResponse } from "@/types/api";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:8080";
@@ -17,15 +18,22 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+// Set-Cookie 헤더를 직접 봐야 하는 로그인처럼 특수한 경우를 위해, 응답 파싱 전 단계를 따로 노출한다.
+export async function apiFetchRaw(path: string, init?: RequestInit): Promise<Response> {
+  const session = await getSessionCookie();
+
+  return fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      // Next 도메인 쿠키에 저장해둔 BE 세션을, BE로 나가는 요청에 그대로 실어 보낸다(쿠키 중계).
+      ...(session ? { Cookie: `${SESSION_COOKIE_NAME}=${session}` } : {}),
       ...init?.headers,
     },
   });
+}
 
+export async function unwrapApiResponse<T>(response: Response): Promise<T> {
   const body = (await response.json()) as ApiResponse<T>;
 
   if (!body.success) {
@@ -37,4 +45,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
 
   return body.data as T;
+}
+
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetchRaw(path, init);
+  return unwrapApiResponse<T>(response);
 }

@@ -2,6 +2,7 @@
 
 import { Menu, X } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -10,7 +11,7 @@ interface NavItem {
   label: string;
 }
 
-export function MobileNav({ items }: { items: NavItem[] }) {
+export function MobileNav({ items, authSlot }: { items: NavItem[]; authSlot?: ReactNode }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -35,6 +36,7 @@ export function MobileNav({ items }: { items: NavItem[] }) {
               {item.label}
             </Link>
           ))}
+          {authSlot && <div className="px-3 py-2">{authSlot}</div>}
         </nav>
       )}
     </div>

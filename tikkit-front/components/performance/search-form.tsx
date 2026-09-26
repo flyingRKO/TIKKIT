@@ -1,3 +1,5 @@
+import { Input } from "@/components/ui/input";
+
 interface SearchFormProps {
   defaultKeyword?: string;
   category?: string;
@@ -11,12 +13,12 @@ export function SearchForm({ defaultKeyword, category, status }: SearchFormProps
     <form method="get" className="flex gap-2">
       {category && <input type="hidden" name="category" value={category} />}
       {status && <input type="hidden" name="status" value={status} />}
-      <input
+      <Input
         type="search"
         name="keyword"
         defaultValue={defaultKeyword}
         placeholder="공연명으로 검색"
-        className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex-1"
       />
       <button
         type="submit"
