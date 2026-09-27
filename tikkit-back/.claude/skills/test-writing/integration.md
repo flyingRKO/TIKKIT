@@ -8,7 +8,11 @@
 
 ## 기본 구조
 
+`integration/{도메인}/` 패키지에 둔다(예: `integration/reservation/ReservationApiIntegrationTest.java`). `domain/{도메인}/controller/`에 두지 않는다 — 컨트롤러·서비스·레포지토리를 다 걸치는 테스트라 "컨트롤러" 패키지에 있으면 컨트롤러 전용 테스트로 오해된다.
+
 ```java
+package com.tikkit.api.integration.reservation;
+
 class ReservationApiIntegrationTest extends AbstractContainerTest {
 
     @Autowired

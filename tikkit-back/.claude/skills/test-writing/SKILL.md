@@ -13,6 +13,18 @@ description: TIKKIT 백엔드에서 서비스/레포지토리 코드를 구현�
 - `repository.md`: 레포지토리 레이어 테스트(Testcontainers, 실제 DB).
 - `integration.md`: 통합 테스트(전체 스프링 컨텍스트, 컨트롤러 포함). 동시성 재현 테스트도 여기 속한다.
 
+## 테스트 위치
+
+서비스/레포지토리/엔티티 테스트는 `src/main`의 도메인 패키지를 그대로 미러링한다(`domain/{도메인}/service/`, `domain/{도메인}/repository/` 등).
+
+통합 테스트는 컨트롤러·서비스·레포지토리를 다 걸치는 "테스트 종류"이므로 별도 패키지에 모은다:
+
+```
+src/test/java/com/tikkit/api/integration/{도메인}/{Resource}ApiIntegrationTest.java
+```
+
+예: `integration/reservation/ReservationApiIntegrationTest.java`. `domain/{도메인}/controller/` 밑에 두지 않는다 — 그 경로는 컨트롤러 전용 테스트가 있는 자리처럼 보여서 안티패턴과 혼동된다.
+
 ## 절차
 
 1. 방금 구현한(또는 보강할) 계층이 무엇인지 확인한다.
@@ -23,6 +35,7 @@ description: TIKKIT 백엔드에서 서비스/레포지토리 코드를 구현�
 ## 안티패턴
 
 - ❌ `@WebMvcTest`로 컨트롤러만 따로 목업 서비스로 테스트 → ✅ 통합 테스트가 컨트롤러까지 실제로 태우므로 별도로 만들지 않는다
+- ❌ 통합 테스트를 `domain/{도메인}/controller/`에 둠 → ✅ `integration/{도메인}/`에 둔다 (컨트롤러 전용 테스트 자리처럼 보이는 걸 방지)
 - ❌ 레포지토리 테스트를 H2로 작성 → ✅ Testcontainers PostgreSQL(조건부 UPDATE, `CHECK` 제약은 H2로 재현 불가)
 - ❌ 성공 케이스만 테스트 → ✅ 예외/실패 케이스(재고 부족, 상태 전이 위반 등)를 반드시 포함
 - ❌ 서비스 테스트에서 실제 DB에 접근 → ✅ Repository는 Mockito로 목업

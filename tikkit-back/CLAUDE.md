@@ -42,6 +42,9 @@ tikkit-back/
 │   │       └── application-test.yml        # 테스트 환경
 │   └── test/
 │       └── java/com/tikkit/api/
+│           ├── domain/{도메인}/{service,repository,entity}/  # 유닛 테스트 (main 패키지 미러링)
+│           ├── integration/{도메인}/       # 통합 테스트 (전체 스프링 컨텍스트, 컨트롤러 포함)
+│           └── support/                    # AbstractContainerTest 등 테스트 공통 베이스
 └── build.gradle
 ```
 
@@ -139,4 +142,4 @@ CORS 설정 필요: `tikkit-front` 도메인 허용
 | 프로파일 | 용도 | DB |
 |---------|------|-----|
 | `dev` | 로컬 개발 | PostgreSQL (Docker) |
-| `test` | 테스트 실행 | H2 인메모리 |
+| `test` | 테스트 실행 | PostgreSQL (Testcontainers) |

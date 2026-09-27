@@ -402,10 +402,12 @@ public class GlobalExceptionHandler {
 
 ### 7. 테스트 작성 시
 
-- Service 테스트: Mockito로 의존성 모킹
-- Repository 테스트: `@DataJpaTest` 슬라이스 테스트
-- Controller 테스트: `@WebMvcTest` 슬라이스 테스트
-- 통합 테스트: `@SpringBootTest`
+- Service 테스트: Mockito로 의존성 모킹 (`domain/{도메인}/service/`)
+- Repository 테스트: `AbstractContainerTest`(Testcontainers 실제 PostgreSQL) 상속, `@DataJpaTest`/H2는 쓰지 않음 (`domain/{도메인}/repository/`)
+- Controller 단독 테스트(`@WebMvcTest` + 목업 서비스)는 만들지 않음 — 통합 테스트가 컨트롤러까지 실제로 태우므로 중복 검증이 됨
+- 통합 테스트: `AbstractContainerTest` 상속, 전체 스프링 컨텍스트 + `MockMvc`로 컨트롤러까지 검증. 별도 패키지 `integration/{도메인}/`에 둔다 (`domain/{도메인}/controller/`가 아님)
+
+자세한 규칙과 예시는 `test-writing` 스킬(`SKILL.md`, `service.md`, `repository.md`, `integration.md`) 참조.
 
 ```java
 @ExtendWith(MockitoExtension.class)
