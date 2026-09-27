@@ -7,7 +7,7 @@
 | Spring Boot | 3.4.5 | 메인 애플리케이션 프레임워크 |
 | Java | 21 | 백엔드 언어 |
 | Spring Data JPA | - | ORM / 데이터 접근 레이어 |
-| QueryDSL | - | 타입 안전 동적 쿼리 |
+| QueryDSL | 5.1.0 (jakarta) | 타입 안전 동적 쿼리 |
 | MyBatis | 3.x | 통계/배치/벤더 특화 SQL |
 | Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
 | Spring Web | - | REST API |
@@ -72,6 +72,16 @@ Controller → Service → Repository → Entity
 | 대용량 배치 | MyBatis |
 | DB 벤더 특화 SQL | MyBatis |
 | 레거시 스키마 매핑 | MyBatis |
+
+### QueryDSL 사용 규칙
+
+- **Custom/Impl 분리**: `XxxRepository extends JpaRepository<X, Long>, XxxRepositoryCustom` (인터페이스에는 `@Repository` 붙이지 않음) + `XxxRepositoryImpl implements XxxRepositoryCustom` (`@RequiredArgsConstructor`로 `JPAQueryFactory` 주입, `private static final QX x = QX.x;` 로 Q타입 참조)
+- **동적 조건**: `BooleanBuilder`로 조건을 조합하거나, null-safe한 `BooleanExpression` 반환 메서드(`xxxEq`, `xxxContains`)로 분리한다. `null`을 리턴하면 `where()`에서 자동으로 무시된다
+- **페이징**: content 쿼리와 count 쿼리를 분리하고 `PageableExecutionUtils.getPage(content, pageable, () -> countQuery)`로 최적화한다. count 쿼리에서 불필요한 join은 뺀다
+- **금지**: `fetchResults()` / `fetchCount()` — Querydsl 5.0부터 Deprecated이며 복잡한 쿼리에서 count 쿼리를 잘못 생성한다
+- **N+1 방지**: 연관관계를 함께 조회해야 하면 `fetchJoin()`을 쓴다. 연관관계는 기본 LAZY 유지
+- **프로젝션**: 결과 컬럼이 여러 개면 DTO(record)를 `Projections.constructor`로 매핑한다. `Tuple`을 리포지토리 밖으로 노출하지 않는다. `@QueryProjection`은 DTO가 QueryDSL에 의존하게 되므로 쓰지 않는다
+- **쓰지 않는 것**: `QuerydslRepositorySupport`, `QuerydslPredicateExecutor`, Querydsl Web 지원 — 조인 제약(특히 `QuerydslPredicateExecutor`는 left join 불가)과 기술 의존성 노출 문제로 실무에 부적합하다
 
 ### 코딩 컨벤션
 

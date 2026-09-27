@@ -99,7 +99,6 @@ public class Ticket {
 - N+1 문제 방지: `@EntityGraph` 또는 fetch join 활용
 
 ```java
-@Repository
 public interface TicketRepository extends JpaRepository<Ticket, Long>, TicketRepositoryCustom {
     
     // 단순 쿼리: 메서드 이름으로 생성
@@ -116,41 +115,42 @@ public interface TicketRepository extends JpaRepository<Ticket, Long>, TicketRep
 
 // QueryDSL 커스텀 Repository 인터페이스
 public interface TicketRepositoryCustom {
-    Page<Ticket> searchTickets(TicketSearchCondition condition, Pageable pageable);
+    Page<TicketSummaryResponse> searchTickets(TicketSearchCondition condition, Pageable pageable);
 }
 
-// QueryDSL 구현체
+// QueryDSL 구현체 (네이밍은 XxxRepositoryImpl, @Repository는 인터페이스에 붙이지 않음)
 @RequiredArgsConstructor
-public class TicketRepositoryCustomImpl implements TicketRepositoryCustom {
+public class TicketRepositoryImpl implements TicketRepositoryCustom {
 
     private final JPAQueryFactory queryFactory;
+    private static final QTicket ticket = QTicket.ticket;
+    private static final QEvent event = QEvent.event;
 
     @Override
-    public Page<Ticket> searchTickets(TicketSearchCondition condition, Pageable pageable) {
-        // 동적 조건 조합
-        List<Ticket> content = queryFactory
-            .selectFrom(ticket)
-            .leftJoin(ticket.event, event).fetchJoin()
-            .where(
-                categoryEq(condition.getCategory()),
-                statusEq(condition.getStatus()),
-                titleContains(condition.getKeyword())
-            )
+    public Page<TicketSummaryResponse> searchTickets(TicketSearchCondition condition, Pageable pageable) {
+        // 동적 조건은 BooleanBuilder로 조합 (재사용을 위해 content/count 쿼리에서 공유)
+        BooleanBuilder where = new BooleanBuilder()
+            .and(categoryEq(condition.getCategory()))
+            .and(statusEq(condition.getStatus()))
+            .and(titleContains(condition.getKeyword()));
+
+        // Entity가 아니라 DTO(record)로 바로 프로젝션 — API 응답에 Entity를 노출하지 않는다
+        List<TicketSummaryResponse> content = queryFactory
+            .select(Projections.constructor(TicketSummaryResponse.class,
+                ticket.id, ticket.title, ticket.category, ticket.status, event.title))
+            .from(ticket)
+            .join(ticket.event, event)
+            .where(where)
             .offset(pageable.getOffset())
             .limit(pageable.getPageSize())
             .fetch();
 
-        // count 쿼리 분리 (성능 최적화)
-        JPAQuery<Long> countQuery = queryFactory
+        // count 쿼리 분리 + PageableExecutionUtils로 최적화 (fetchResults()/fetchCount()는 Deprecated이므로 쓰지 않음)
+        return PageableExecutionUtils.getPage(content, pageable, () -> queryFactory
             .select(ticket.count())
             .from(ticket)
-            .where(
-                categoryEq(condition.getCategory()),
-                statusEq(condition.getStatus()),
-                titleContains(condition.getKeyword())
-            );
-
-        return PageableExecutionUtils.getPage(content, pageable, countQuery::fetchOne);
+            .where(where)
+            .fetchOne());
     }
 
     // BooleanExpression으로 조건 분리 (null-safe)

@@ -61,6 +61,8 @@ Java 또는 Spring Boot 코드가 포함된 경우:
   - Q클래스 임포트 및 타입 안전성 확인
   - BooleanBuilder / BooleanExpression으로 조건 조합
   - JPA 메서드 네이밍 vs @Query JPQL vs QueryDSL vs MyBatis 적절한 선택 (용도별 사용 원칙 준수)
+  - Custom/Impl 네이밍 규칙 준수 (`XxxRepositoryCustom` + `XxxRepositoryImpl`, 인터페이스에 `@Repository` 미사용)
+  - `fetchResults()`/`fetchCount()` 대신 count 쿼리 분리 + `PageableExecutionUtils` 사용 (Querydsl 5.0+ Deprecated)
 - **MyBatis 패턴** (통계/리포트/배치/벤더 특화 쿼리):
   - `@Mapper` 인터페이스 + XML 매퍼 분리 규칙 준수 여부
   - SQL Injection 방지: `#{}` 파라미터 바인딩 사용 (`${}` 직접 치환 지양)
