@@ -84,7 +84,7 @@ COMMENT ON COLUMN ticket_grades.total_quantity IS '등급별 총 판매 수량';
 COMMENT ON COLUMN ticket_grades.remaining_quantity IS '잔여 수량. total_quantity에서 활성 예약 수량 합을 뺀 값과 항상 같아야 하며, 동시성 제어(조건부 UPDATE)의 대상이라 인덱스를 걸지 않는다';
 
 COMMENT ON TABLE reservations IS '예매 내역 (좌석 선점부터 결제·취소·만료까지의 상태를 관리)';
-COMMENT ON COLUMN reservations.reservation_no IS '사용자에게 노출되는 예매번호 (TK{yyMMdd}-{6자리})';
+COMMENT ON COLUMN reservations.reservation_no IS '사용자에게 노출되는 예매번호 (TK{yyMMdd}-{6자리}). 날짜는 Asia/Seoul 기준, 뒤 6자리는 reservation_no_seq 시퀀스(V2)로 채번';
 COMMENT ON COLUMN reservations.member_id IS '예매한 회원 (members 참조)';
 COMMENT ON COLUMN reservations.schedule_id IS '예매 대상 회차 (schedules 참조). ticket_grade_id를 거치지 않고 회차별 예약을 바로 조회하기 위한 의도적 중복 경로';
 COMMENT ON COLUMN reservations.ticket_grade_id IS '예매한 좌석 등급 (ticket_grades 참조)';
@@ -294,6 +294,7 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 |---|---|---|
 | V1 | 초기 스키마 (venues, members, performances, schedules, ticket_grades, reservations, payments) | 005 |
 | V1_1 | dev 시드 데이터 (dev 프로필 전용) | 005 |
+| V2 | `reservation_no_seq` 시퀀스 추가 (예약번호 뒤 6자리 채번) | 012 |
 | V3 | `ticket_grades.version` 컬럼 추가 (낙관적 락) | 019 |
 | V4 | 지정석 테이블 생성 (seats, schedule_seats, reservation_seats) | 021 |
 | V5 / V5_1 | 기존 데이터 좌석 배정 백필 / 개발용 배치도 시드 | 021 |

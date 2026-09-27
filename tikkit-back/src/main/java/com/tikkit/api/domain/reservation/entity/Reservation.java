@@ -23,6 +23,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 
 @Getter
@@ -30,6 +31,9 @@ import java.time.Instant;
 @Table(name = "reservations")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Reservation extends BaseTimeEntity {
+
+    /** 선점(홀드) 유지 시간. docs/PRD.md 비즈니스 규칙 참조. */
+    public static final Duration HOLD_DURATION = Duration.ofMinutes(10);
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -86,5 +90,22 @@ public class Reservation extends BaseTimeEntity {
         this.expiresAt = expiresAt;
         this.confirmedAt = confirmedAt;
         this.cancelledAt = cancelledAt;
+    }
+
+    /** 선점(홀드) 예약을 생성한다. 단가는 생성 시점의 등급 가격을 스냅샷으로 저장한다. */
+    public static Reservation createPending(String reservationNo, Member member, TicketGrade ticketGrade,
+                                              int quantity, Instant now) {
+        BigDecimal unitPrice = ticketGrade.getPrice();
+        return Reservation.builder()
+                .reservationNo(reservationNo)
+                .member(member)
+                .schedule(ticketGrade.getSchedule())
+                .ticketGrade(ticketGrade)
+                .quantity(quantity)
+                .unitPrice(unitPrice)
+                .totalAmount(unitPrice.multiply(BigDecimal.valueOf(quantity)))
+                .status(ReservationStatus.PENDING)
+                .expiresAt(now.plus(HOLD_DURATION))
+                .build();
     }
 }

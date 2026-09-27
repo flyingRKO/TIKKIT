@@ -76,6 +76,7 @@ journey
 - **취소 가능 마감 시점은 미확정 — "공연 24시간 전"을 임시안으로 제안한다.** 실제 정책은 착수 전 확인이 필요하다.
 - 모의 결제는 항상 성공한다 (실제 PG 연동은 MVP 범위 밖).
 - MVP에서는 회원당 구매 매수 제한을 두지 않는다.
+- 단, 같은 회원이 같은 등급에 이미 PENDING 선점을 갖고 있으면 새로 선점할 수 없다 (`DUPLICATE_PENDING_RESERVATION`). 다른 등급·다른 회차는 별도로 선점 가능하다.
 
 ## 데이터 모델 요약
 
@@ -118,7 +119,7 @@ journey
 | POST | /reservations/{id}/cancel | ✔ | → CANCELLED |
 
 - **에러 포맷**: `{success: false, code, message, errors: []}`
-- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401)
+- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `DUPLICATE_PENDING_RESERVATION`(409, 같은 회원이 같은 등급에 이미 PENDING 선점을 가진 경우), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401)
 - **소유권 검증**: 타인 소유 예약(`GET/POST /reservations/{id}/...`)에 접근하면 403이 아닌 404를 반환한다 — 존재 여부 자체를 노출하지 않기 위함이다.
 - API 계약이 구현되면(Task 006) springdoc(`/swagger-ui.html`)이 진실의 원천이 되고, 이 표는 요약으로만 유지한다.
 

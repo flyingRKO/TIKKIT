@@ -21,10 +21,12 @@ public enum ErrorCode {
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
 
     // 예매 도메인
-    BOOKING_NOT_OPEN(HttpStatus.BAD_REQUEST, "아직 예매 가능한 시간이 아닙니다."),
+    // 오픈 전·마감 후를 구분하지 않고 같은 코드를 쓴다 (docs/PRD.md 참조)
+    BOOKING_NOT_OPEN(HttpStatus.BAD_REQUEST, "예매 가능한 기간이 아닙니다."),
     SOLD_OUT(HttpStatus.CONFLICT, "잔여 좌석이 없습니다."),
     RESERVATION_EXPIRED(HttpStatus.CONFLICT, "선점 시간이 만료된 예약입니다."),
-    INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 처리할 수 없는 요청입니다.");
+    INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 처리할 수 없는 요청입니다."),
+    DUPLICATE_PENDING_RESERVATION(HttpStatus.CONFLICT, "이미 선점 중인 예약이 있습니다.");
 
     private final HttpStatus status;
     private final String message;
