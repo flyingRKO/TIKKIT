@@ -105,11 +105,12 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 ### Phase 3: 예매·결제
 
-- **Task 012: [BE] 예매 선점 API (PENDING 홀드)**
-  - `POST /reservations`: 판매 기간, 수량(1~4매), 잔여 수량 검증
-  - **의도적으로 동시성을 보장하지 않는 단순 차감** 구현 (`remaining -= quantity` 후 더티체킹으로 반영). 코드에 `// 동시성 미보장 — Phase 5(Task 018~020)에서 개선` 주석 명시, README "알려진 한계"에도 기록
-  - `expires_at = now + 10분`, 예약번호 `TK{yyMMdd}-{6자리}` 생성
-  - 단일 스레드 단위/통합 테스트
+- **Task 012: [BE] 예매 선점 API (PENDING 홀드)** ✅ - 완료
+  - ✅ `POST /reservations`: 판매 기간, 수량(1~4매), 잔여 수량 검증
+  - ✅ **의도적으로 동시성을 보장하지 않는 단순 차감** 구현 (`remaining -= quantity` 후 더티체킹으로 반영). 코드에 `// 동시성 미보장 — Phase 5(Task 018~020)에서 개선` 주석 명시, README "알려진 한계"에도 기록
+  - ✅ `expires_at = now + 10분`, 예약번호 `TK{yyMMdd}-{6자리}` 생성 (뒤 6자리는 `reservation_no_seq` DB 시퀀스로 채번)
+  - ✅ 같은 회원이 같은 등급에 이미 PENDING 선점이 있으면 중복 선점 차단 (`DUPLICATE_PENDING_RESERVATION`, 코드 리뷰에서 도출되어 PRD에도 반영)
+  - ✅ 단위(Service/Entity)·통합(Controller) 테스트
 - **Task 013: [BE] 모의 결제·취소·만료 처리**
   - 결제(PENDING → CONFIRMED, payment row 생성) 및 취소(재고 복원, REFUNDED) 구현
   - `@Scheduled(fixedDelay = 60000)` 만료 배치, 상태 전이 규칙 강제 (아래 예약 상태 머신 참조)
@@ -249,5 +250,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-09-26
-**📊 진행 상황**: Phase 2 진행 중 (11/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-09-27
+**📊 진행 상황**: Phase 3 진행 중 (12/33 Tasks 완료)

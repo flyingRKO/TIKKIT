@@ -1,6 +1,8 @@
 package com.tikkit.api.domain.performance.entity;
 
 import com.tikkit.api.common.entity.BaseTimeEntity;
+import com.tikkit.api.common.exception.BusinessException;
+import com.tikkit.api.common.exception.ErrorCode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -54,5 +56,17 @@ public class TicketGrade extends BaseTimeEntity {
         this.price = price;
         this.totalQuantity = totalQuantity;
         this.remainingQuantity = remainingQuantity;
+    }
+
+    /**
+     * 잔여 수량을 차감한다.
+     * 동시성 미보장 — 단순히 읽은 값을 그대로 빼고 더티체킹으로 반영하는 방식이라 동시 요청이 몰리면
+     * lost update(초과 판매)가 발생할 수 있다. Phase 5(Task 018~020)에서 조건부 UPDATE로 개선한다.
+     */
+    public void decreaseRemaining(int quantity) {
+        if (remainingQuantity < quantity) {
+            throw new BusinessException(ErrorCode.SOLD_OUT);
+        }
+        this.remainingQuantity -= quantity;
     }
 }

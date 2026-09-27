@@ -47,4 +47,9 @@ public class Schedule extends BaseTimeEntity {
         this.bookingOpenAt = bookingOpenAt;
         this.bookingCloseAt = bookingCloseAt;
     }
+
+    /** 예매 가능 기간(bookingOpenAt ~ bookingCloseAt) 안인지 확인한다. 마감 시각은 포함하지 않는다. */
+    public boolean isBookingOpen(Instant now) {
+        return !now.isBefore(bookingOpenAt) && now.isBefore(bookingCloseAt);
+    }
 }

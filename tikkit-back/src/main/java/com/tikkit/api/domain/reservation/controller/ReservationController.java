@@ -9,13 +9,17 @@ import com.tikkit.api.domain.reservation.dto.ReservationDetailResponse;
 import com.tikkit.api.domain.reservation.dto.ReservationResponse;
 import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
+import com.tikkit.api.domain.reservation.service.ReservationService;
+import com.tikkit.api.security.MemberDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,16 +36,17 @@ import java.util.List;
 @Tag(name = "Reservation", description = "예매 선점·조회·결제·취소")
 @RestController
 @RequestMapping("/api/v1/reservations")
+@RequiredArgsConstructor
 public class ReservationController {
+
+    private final ReservationService reservationService;
 
     @Operation(summary = "예매 선점 (10분 홀드)")
     @PostMapping
-    public ResponseEntity<ApiResponse<ReservationResponse>> create(@RequestBody @Valid ReservationCreateRequest request) {
-        // TODO(Task 012): 판매 기간·잔여 수량 검증 후 실제 선점 로직 연결
-        ReservationResponse dummy = new ReservationResponse(
-                1L, "TK260925-000001", ReservationStatus.PENDING,
-                Instant.now().plus(10, ChronoUnit.MINUTES), null, null);
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(dummy));
+    public ResponseEntity<ApiResponse<ReservationResponse>> create(@AuthenticationPrincipal MemberDetails memberDetails,
+                                                                     @RequestBody @Valid ReservationCreateRequest request) {
+        ReservationResponse response = reservationService.create(memberDetails.getMemberId(), request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }
 
     @Operation(summary = "내 예매 목록 조회")
