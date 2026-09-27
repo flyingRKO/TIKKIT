@@ -1,4 +1,4 @@
-package com.tikkit.api.domain.member.controller;
+package com.tikkit.api.integration.member;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.domain.member.dto.LoginRequest;

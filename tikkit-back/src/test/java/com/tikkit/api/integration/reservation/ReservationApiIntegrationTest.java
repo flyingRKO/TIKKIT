@@ -1,4 +1,4 @@
-package com.tikkit.api.domain.reservation.controller;
+package com.tikkit.api.integration.reservation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.domain.member.dto.LoginRequest;

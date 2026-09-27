@@ -1,4 +1,4 @@
-package com.tikkit.api.domain.performance.controller;
+package com.tikkit.api.integration.performance;
 
 import com.tikkit.api.domain.performance.entity.Performance;
 import com.tikkit.api.domain.performance.entity.PerformanceCategory;
