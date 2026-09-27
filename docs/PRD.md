@@ -73,8 +73,9 @@ journey
 - 선점(홀드) 유지 시간은 **10분**이다.
 - 하나의 예약은 **하나의 등급**, **최대 4매**까지 가능하다.
 - 예매는 회차의 `booking_open_at`~`booking_close_at` 사이에만 가능하다.
-- **취소 가능 마감 시점은 미확정 — "공연 24시간 전"을 임시안으로 제안한다.** 실제 정책은 착수 전 확인이 필요하다.
-- 모의 결제는 항상 성공한다 (실제 PG 연동은 MVP 범위 밖).
+- **취소 가능 마감**: CONFIRMED 예매는 공연 시작(`schedule.show_at`) 24시간 전까지만 취소할 수 있다 (마감 후 취소 시도는 `CANCEL_DEADLINE_PASSED`). PENDING 예매는 시점 제한 없이 취소할 수 있다.
+- 모의 결제는 항상 성공한다 (실제 PG 연동은 MVP 범위 밖). `PaymentGateway` 인터페이스 뒤에 `MockPaymentGateway`를 두어, 이후 실제 PG(토스/포트원 등)로 교체할 때 서비스 로직은 바꾸지 않도록 한다.
+- `performances.status`/`start_date`/`end_date`는 회차(schedule)로부터 파생된다: 판매 기간(`booking_open_at`~`booking_close_at`) 안인 회차가 하나라도 있으면 `ON_SALE`, 없지만 앞으로 열릴 회차가 있으면 `UPCOMING`, 그 외는 `CLOSED`. `start_date`/`end_date`는 회차 `show_at`(KST 날짜 기준)의 최소·최대값이다.
 - MVP에서는 회원당 구매 매수 제한을 두지 않는다.
 - 단, 같은 회원이 같은 등급에 이미 PENDING 선점을 갖고 있으면 새로 선점할 수 없다 (`DUPLICATE_PENDING_RESERVATION`). 다른 등급·다른 회차는 별도로 선점 가능하다.
 
@@ -115,11 +116,11 @@ journey
 | POST | /reservations | ✔ | `{scheduleId, ticketGradeId, quantity}` → 201 PENDING + expiresAt |
 | GET | /reservations?status&page | ✔ | 본인 예약만 조회 |
 | GET | /reservations/{id} | ✔ | 소유자 검증 |
-| POST | /reservations/{id}/payments | ✔ | `{method}` → CONFIRMED |
-| POST | /reservations/{id}/cancel | ✔ | → CANCELLED |
+| POST | /reservations/{id}/payments | ✔ | `{method}` → CONFIRMED. 선점 만료 후 요청 시 409 `RESERVATION_EXPIRED` |
+| POST | /reservations/{id}/cancel | ✔ | → CANCELLED (CONFIRMED는 공연 24시간 전까지만 가능, 재고 복원·결제 REFUNDED) |
 
 - **에러 포맷**: `{success: false, code, message, errors: []}`
-- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `DUPLICATE_PENDING_RESERVATION`(409, 같은 회원이 같은 등급에 이미 PENDING 선점을 가진 경우), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401)
+- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `DUPLICATE_PENDING_RESERVATION`(409, 같은 회원이 같은 등급에 이미 PENDING 선점을 가진 경우), `CANCEL_DEADLINE_PASSED`(409, CONFIRMED 예매를 공연 24시간 전 이후에 취소하려는 경우), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401)
 - **소유권 검증**: 타인 소유 예약(`GET/POST /reservations/{id}/...`)에 접근하면 403이 아닌 404를 반환한다 — 존재 여부 자체를 노출하지 않기 위함이다.
 - API 계약이 구현되면(Task 006) springdoc(`/swagger-ui.html`)이 진실의 원천이 되고, 이 표는 요약으로만 유지한다.
 

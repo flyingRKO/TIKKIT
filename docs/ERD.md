@@ -28,7 +28,7 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 | `ticket_grades.remaining_quantity` | 불변식은 `remaining_quantity = total_quantity - SUM(활성 예약의 quantity)`이다. 매 조회마다 집계하지 않고 Phase 5의 조건부 UPDATE(`WHERE remaining_quantity >= :qty`)가 원자적으로 갱신하는 대상이므로 컬럼으로 유지한다. **이 컬럼에는 인덱스를 걸지 않는다** — 인덱스가 있으면 매 예매마다 Postgres의 HOT(Heap-Only Tuple) 업데이트를 못 써 쓰기 비용이 커진다. |
 | `reservations.unit_price` | 예매 시점의 `ticket_grades.price` 스냅샷. 이후 가격이 바뀌어도 이미 만든 예약의 금액은 변하지 않아야 한다. |
 | `reservations.total_amount` | `unit_price * quantity`와 동일하지만, V1부터 `CHECK(total_amount = unit_price * quantity)` 제약으로 항상 일치함을 DB가 보장한다. Phase 6에서도 "한 예약 = 한 등급" 정책을 유지하므로 이 계산식은 그대로 쓴다. |
-| `performances.status`, `start_date`, `end_date` | `schedules`의 판매 기간·공연 일시로부터 파생되는 표시/필터용 값이다. 실제 예매 가능 여부는 항상 `schedules.booking_open_at`/`booking_close_at`로 판단하고, `performances`의 이 값들은 Task 013의 만료 배치가 함께 재계산해 갱신한다(그렇지 않으면 시드 직후부터 값이 stale해진다). |
+| `performances.status`, `start_date`, `end_date` | `schedules`의 판매 기간·공연 일시로부터 파생되는 표시/필터용 값이다. 실제 예매 가능 여부는 항상 `schedules.booking_open_at`/`booking_close_at`로 판단하고, `performances`의 이 값들은 Task 013의 만료 배치가 함께 재계산해 갱신한다(그렇지 않으면 시드 직후부터 값이 stale해진다). 재계산 규칙: 판매 기간 안인 회차가 1개 이상이면 `ON_SALE`, 없지만 앞으로 열릴 회차가 있으면 `UPCOMING`, 그 외는 `CLOSED`. `start_date`/`end_date`는 회차 `show_at`(KST 날짜 기준)의 min·max. |
 
 ## 1. MVP 스키마 (V1)
 
@@ -281,12 +281,12 @@ erDiagram
 ## 3. 예약 상태 머신
 
 ```
-PENDING --(결제)--> CONFIRMED --(취소)--> CANCELLED
-PENDING --(사용자 취소)--> CANCELLED
+PENDING --(결제)--> CONFIRMED --(취소, 공연 24시간 전까지만)--> CANCELLED
+PENDING --(사용자 취소, 시점 제한 없음)--> CANCELLED
 PENDING --(expires_at 경과, 스케줄러)--> EXPIRED
 ```
 
-CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 전환 후: `schedule_seats.status`)를 복원한다. Phase 5(동시성 제어)부터 모든 전이는 현재 상태를 WHERE 조건에 포함하는 조건부 UPDATE로 처리한다.
+CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 전환 후: `schedule_seats.status`)를 복원한다. CONFIRMED → CANCELLED는 공연 시작(`schedules.show_at`) 24시간 전까지만 허용하며, 마감 후 시도하면 `CANCEL_DEADLINE_PASSED`(409)를 반환한다. Phase 5(동시성 제어)부터 모든 전이는 현재 상태를 WHERE 조건에 포함하는 조건부 UPDATE로 처리한다.
 
 ## 4. 마이그레이션 이력
 
