@@ -46,4 +46,17 @@ class TicketGradeTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.SOLD_OUT);
         assertThat(grade.getRemainingQuantity()).isEqualTo(2);
     }
+
+    @Test
+    @DisplayName("잔여 수량이 취소·만료된 수량만큼 복원된다")
+    void 잔여_수량_복원() {
+        // given
+        TicketGrade grade = grade(2);
+
+        // when
+        grade.increaseRemaining(3);
+
+        // then
+        assertThat(grade.getRemainingQuantity()).isEqualTo(5);
+    }
 }
