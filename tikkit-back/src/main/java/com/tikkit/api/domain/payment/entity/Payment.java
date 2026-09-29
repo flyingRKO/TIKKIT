@@ -1,6 +1,8 @@
 package com.tikkit.api.domain.payment.entity;
 
 import com.tikkit.api.common.entity.BaseTimeEntity;
+import com.tikkit.api.common.exception.BusinessException;
+import com.tikkit.api.common.exception.ErrorCode;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -63,5 +65,26 @@ public class Payment extends BaseTimeEntity {
         this.transactionKey = transactionKey;
         this.paidAt = paidAt;
         this.refundedAt = refundedAt;
+    }
+
+    /** 결제 승인 성공 직후 PAID 상태의 결제 내역을 생성한다. transactionKey는 PaymentGateway 응답값이다. */
+    public static Payment paid(Reservation reservation, PaymentMethod method, String transactionKey, Instant now) {
+        return Payment.builder()
+                .reservation(reservation)
+                .amount(reservation.getTotalAmount())
+                .method(method)
+                .status(PaymentStatus.PAID)
+                .transactionKey(transactionKey)
+                .paidAt(now)
+                .build();
+    }
+
+    /** PAID -> REFUNDED 전이. 예약 취소 시 PaymentGateway 환불 호출 이후에 호출한다. */
+    public void refund(Instant now) {
+        if (status != PaymentStatus.PAID) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
+        }
+        this.status = PaymentStatus.REFUNDED;
+        this.refundedAt = now;
     }
 }

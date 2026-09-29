@@ -111,15 +111,15 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `expires_at = now + 10분`, 예약번호 `TK{yyMMdd}-{6자리}` 생성 (뒤 6자리는 `reservation_no_seq` DB 시퀀스로 채번)
   - ✅ 같은 회원이 같은 등급에 이미 PENDING 선점이 있으면 중복 선점 차단 (`DUPLICATE_PENDING_RESERVATION`, 코드 리뷰에서 도출되어 PRD에도 반영)
   - ✅ 단위(Service/Entity)·통합(Controller) 테스트
-- **Task 013: [BE] 모의 결제·취소·만료 처리**
-  - 결제(PENDING → CONFIRMED, payment row 생성) 및 취소(재고 복원, REFUNDED) 구현
-  - 결제는 `PaymentGateway` 인터페이스 뒤에 `MockPaymentGateway`(UUID transactionKey, 항상 성공)를 둔다. 이후 실제 PG로 교체할 때 서비스 로직을 바꾸지 않기 위함
-  - 취소는 PENDING이면 시점 제한 없이, CONFIRMED면 공연 24시간 전까지만 가능 (마감 후 `CANCEL_DEADLINE_PASSED`)
-  - `@Scheduled(fixedDelay = 60000)` 만료 배치, 상태 전이 규칙 강제 (아래 예약 상태 머신 참조). MyBatis 없이 JPA `@Modifying` native 쿼리로 처리하고, 만료 처리와 재고 복원은 Postgres data-modifying CTE 한 문장으로 묶어 원자적으로 반영한다. 테스트 프로필에서는 스케줄링을 꺼서 통합 테스트에 배치가 끼어들지 않게 한다
-  - 같은 배치 주기에 `performances.status`/`start_date`/`end_date`도 함께 재계산 (파생값이므로 별도 배치를 만들지 않고 여기 얹는다). 규칙: 판매 기간 안인 회차가 1개 이상이면 `ON_SALE`, 없지만 앞으로 열릴 회차가 있으면 `UPCOMING`, 그 외 `CLOSED`. `start_date`/`end_date`는 회차 `show_at`(KST 날짜)의 min·max
-  - 내 예매 목록/상세 조회 (소유자 검증 포함)
-  - 모든 상태 전이 테스트 (만료 후 결제 시도 → 409 포함)
-  - 결제 처리 중 만료 배치가 동시에 도는 경쟁 상태(재고 이중 복원 가능성)는 막지 않고 Task 018의 재현 대상으로 남긴다
+- **Task 013: [BE] 모의 결제·취소·만료 처리** ✅ - 완료
+  - ✅ 결제(PENDING → CONFIRMED, payment row 생성) 및 취소(재고 복원, REFUNDED) 구현
+  - ✅ 결제는 `PaymentGateway` 인터페이스 뒤에 `MockPaymentGateway`(UUID transactionKey, 항상 성공)를 둔다. 이후 실제 PG로 교체할 때 서비스 로직을 바꾸지 않기 위함
+  - ✅ 취소는 PENDING이면 시점 제한 없이, CONFIRMED면 공연 24시간 전까지만 가능 (마감 후 `CANCEL_DEADLINE_PASSED`)
+  - ✅ `@Scheduled(fixedDelay = 60000)` 만료 배치, 상태 전이 규칙 강제 (아래 예약 상태 머신 참조). MyBatis 없이 JPA `@Modifying` native 쿼리로 처리하고, 만료 처리와 재고 복원은 Postgres data-modifying CTE 한 문장으로 묶어 원자적으로 반영한다. 테스트 프로필에서는 스케줄링을 꺼서 통합 테스트에 배치가 끼어들지 않게 한다
+  - ✅ 같은 배치 주기에 `performances.status`/`start_date`/`end_date`도 함께 재계산 (파생값이므로 별도 배치를 만들지 않고 여기 얹는다). 규칙: 판매 기간 안인 회차가 1개 이상이면 `ON_SALE`, 없지만 앞으로 열릴 회차가 있으면 `UPCOMING`, 그 외 `CLOSED`. `start_date`/`end_date`는 회차 `show_at`(KST 날짜)의 min·max
+  - ✅ 내 예매 목록/상세 조회 (소유자 검증 포함)
+  - ✅ 모든 상태 전이 테스트 (만료 후 결제 시도 → 409 포함)
+  - ✅ 결제 처리 중 만료 배치가 동시에 도는 경쟁 상태(재고 이중 복원 가능성)는 막지 않고 Task 018의 재현 대상으로 남긴다 (README "알려진 한계"에도 기록)
 - **Task 014: [FE] 예매·결제 플로우 화면**
   - 상세 페이지에서 옵션 선택 → `POST` → `/booking/[id]`로 이동
   - 결제 페이지: 카운트다운 타이머, 주문 요약, 모의 결제수단 선택
@@ -253,5 +253,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-09-27
-**📊 진행 상황**: Phase 3 진행 중 (12/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-09-29
+**📊 진행 상황**: Phase 3 진행 중 (13/33 Tasks 완료)
