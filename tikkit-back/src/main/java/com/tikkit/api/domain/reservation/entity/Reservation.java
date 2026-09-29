@@ -1,6 +1,8 @@
 package com.tikkit.api.domain.reservation.entity;
 
 import com.tikkit.api.common.entity.BaseTimeEntity;
+import com.tikkit.api.common.exception.BusinessException;
+import com.tikkit.api.common.exception.ErrorCode;
 import com.tikkit.api.domain.member.entity.Member;
 import com.tikkit.api.domain.performance.entity.Schedule;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
@@ -34,6 +36,9 @@ public class Reservation extends BaseTimeEntity {
 
     /** 선점(홀드) 유지 시간. docs/PRD.md 비즈니스 규칙 참조. */
     public static final Duration HOLD_DURATION = Duration.ofMinutes(10);
+
+    /** CONFIRMED 예약의 취소 가능 마감 기준(공연 시작 몇 시간 전까지). docs/PRD.md 비즈니스 규칙 참조. */
+    public static final Duration CANCEL_DEADLINE_BEFORE_SHOW = Duration.ofHours(24);
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -107,5 +112,37 @@ public class Reservation extends BaseTimeEntity {
                 .status(ReservationStatus.PENDING)
                 .expiresAt(now.plus(HOLD_DURATION))
                 .build();
+    }
+
+    /** 선점 만료 시각이 지났는지 확인한다 (만료 시각 포함). */
+    public boolean isExpired(Instant now) {
+        return !now.isBefore(expiresAt);
+    }
+
+    /** 공연 시작 기준 취소 가능 마감이 지났는지 확인한다. CONFIRMED 취소에만 적용한다. */
+    public boolean isCancelDeadlinePassed(Instant now) {
+        return !now.isBefore(schedule.getShowAt().minus(CANCEL_DEADLINE_BEFORE_SHOW));
+    }
+
+    /** PENDING -> CONFIRMED 전이. 결제 승인 성공 후 호출한다. */
+    public void confirm(Instant now) {
+        if (status != ReservationStatus.PENDING) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
+        }
+        this.status = ReservationStatus.CONFIRMED;
+        this.confirmedAt = now;
+    }
+
+    /**
+     * PENDING/CONFIRMED -> CANCELLED 전이.
+     * 만료 시각이 지난 PENDING도 취소는 허용한다 (docs/PRD.md: PENDING은 시점 제한 없이 취소 가능).
+     * 실제 만료 처리는 스케줄러(ReservationExpiryScheduler)가 별도로 수행한다.
+     */
+    public void cancel(Instant now) {
+        if (status != ReservationStatus.PENDING && status != ReservationStatus.CONFIRMED) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
+        }
+        this.status = ReservationStatus.CANCELLED;
+        this.cancelledAt = now;
     }
 }

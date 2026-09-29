@@ -26,7 +26,8 @@ public enum ErrorCode {
     SOLD_OUT(HttpStatus.CONFLICT, "잔여 좌석이 없습니다."),
     RESERVATION_EXPIRED(HttpStatus.CONFLICT, "선점 시간이 만료된 예약입니다."),
     INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 처리할 수 없는 요청입니다."),
-    DUPLICATE_PENDING_RESERVATION(HttpStatus.CONFLICT, "이미 선점 중인 예약이 있습니다.");
+    DUPLICATE_PENDING_RESERVATION(HttpStatus.CONFLICT, "이미 선점 중인 예약이 있습니다."),
+    CANCEL_DEADLINE_PASSED(HttpStatus.CONFLICT, "취소 가능 기한이 지났습니다.");
 
     private final HttpStatus status;
     private final String message;

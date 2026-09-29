@@ -69,4 +69,13 @@ public class TicketGrade extends BaseTimeEntity {
         }
         this.remainingQuantity -= quantity;
     }
+
+    /**
+     * 취소·만료된 예약의 수량만큼 잔여 수량을 복원한다.
+     * 동시성 미보장 — decreaseRemaining과 마찬가지로 더티체킹 방식이라 결제·만료 배치가 겹치면
+     * 이중 복원이 날 수 있다. Phase 5(Task 018~020)에서 개선한다.
+     */
+    public void increaseRemaining(int quantity) {
+        this.remainingQuantity += quantity;
+    }
 }

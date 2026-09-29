@@ -4,9 +4,13 @@ import com.tikkit.api.domain.performance.dto.PerformanceSummaryResponse;
 import com.tikkit.api.domain.performance.entity.Performance;
 import com.tikkit.api.domain.performance.entity.PerformanceCategory;
 import com.tikkit.api.domain.performance.entity.PerformanceStatus;
+import com.tikkit.api.domain.performance.entity.Schedule;
+import com.tikkit.api.domain.performance.repository.ScheduleRepository;
 import com.tikkit.api.domain.venue.entity.Venue;
 import com.tikkit.api.domain.venue.repository.VenueRepository;
 import com.tikkit.api.support.AbstractContainerTest;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,7 +19,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,10 +31,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Transactional
 class PerformanceRepositoryTest extends AbstractContainerTest {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     @Autowired
     private VenueRepository venueRepository;
     @Autowired
     private PerformanceRepository performanceRepository;
+    @Autowired
+    private ScheduleRepository scheduleRepository;
+
+    @PersistenceContext
+    private EntityManager em;
 
     private Venue venue;
     private Performance classicOnSale;
@@ -121,6 +135,108 @@ class PerformanceRepositoryTest extends AbstractContainerTest {
         Optional<Performance> found = performanceRepository.findByIdWithVenue(999_999L);
 
         assertThat(found).isEmpty();
+    }
+
+    @Test
+    @DisplayName("판매 기간 안인 회차가 있으면 ON_SALE로 재계산된다")
+    void 파생상태_판매기간_안이면_ON_SALE() {
+        // given: UPCOMING으로 저장해둔 공연에 지금 판매 중인 회차를 하나 추가한다
+        Performance performance = performanceRepository.save(
+                performance("재계산 대상", PerformanceCategory.CONCERT, PerformanceStatus.UPCOMING, null));
+        Instant now = Instant.now();
+        schedule(performance, now.plus(10, ChronoUnit.DAYS), now.minus(1, ChronoUnit.DAYS), now.plus(9, ChronoUnit.DAYS));
+
+        // when
+        performanceRepository.recalculateDerivedFields(now);
+        em.clear();
+
+        // then
+        Performance reloaded = performanceRepository.findById(performance.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(PerformanceStatus.ON_SALE);
+    }
+
+    @Test
+    @DisplayName("판매 기간인 회차는 없지만 앞으로 열릴 회차가 있으면 UPCOMING으로 재계산된다")
+    void 파생상태_미래회차만_있으면_UPCOMING() {
+        // given
+        Performance performance = performanceRepository.save(
+                performance("재계산 대상", PerformanceCategory.CONCERT, PerformanceStatus.CLOSED, null));
+        Instant now = Instant.now();
+        schedule(performance, now.plus(20, ChronoUnit.DAYS), now.plus(10, ChronoUnit.DAYS), now.plus(19, ChronoUnit.DAYS));
+
+        // when
+        performanceRepository.recalculateDerivedFields(now);
+        em.clear();
+
+        // then
+        Performance reloaded = performanceRepository.findById(performance.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(PerformanceStatus.UPCOMING);
+    }
+
+    @Test
+    @DisplayName("모든 회차의 판매가 마감됐으면 CLOSED로 재계산된다")
+    void 파생상태_모두_마감이면_CLOSED() {
+        // given
+        Performance performance = performanceRepository.save(
+                performance("재계산 대상", PerformanceCategory.CONCERT, PerformanceStatus.ON_SALE, null));
+        Instant now = Instant.now();
+        schedule(performance, now.minus(5, ChronoUnit.DAYS), now.minus(20, ChronoUnit.DAYS), now.minus(6, ChronoUnit.DAYS));
+
+        // when
+        performanceRepository.recalculateDerivedFields(now);
+        em.clear();
+
+        // then
+        Performance reloaded = performanceRepository.findById(performance.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(PerformanceStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("start_date/end_date는 여러 회차 showAt(KST 날짜)의 최소·최대값으로 재계산된다")
+    void 파생상태_시작종료일_회차_최소최대() {
+        // given
+        Performance performance = performanceRepository.save(
+                performance("재계산 대상", PerformanceCategory.CONCERT, PerformanceStatus.UPCOMING, null));
+        Instant now = Instant.now();
+        Instant earlierShowAt = now.plus(5, ChronoUnit.DAYS);
+        Instant laterShowAt = now.plus(15, ChronoUnit.DAYS);
+        schedule(performance, earlierShowAt, now.minus(1, ChronoUnit.DAYS), now.plus(4, ChronoUnit.DAYS));
+        schedule(performance, laterShowAt, now.minus(1, ChronoUnit.DAYS), now.plus(14, ChronoUnit.DAYS));
+
+        // when
+        performanceRepository.recalculateDerivedFields(now);
+        em.clear();
+
+        // then
+        Performance reloaded = performanceRepository.findById(performance.getId()).orElseThrow();
+        assertThat(reloaded.getStartDate()).isEqualTo(earlierShowAt.atZone(KST).toLocalDate());
+        assertThat(reloaded.getEndDate()).isEqualTo(laterShowAt.atZone(KST).toLocalDate());
+    }
+
+    @Test
+    @DisplayName("재계산 결과가 기존 값과 같으면 두 번째 호출부터는 UPDATE 대상에서 빠진다")
+    void 파생상태_값이_같으면_반영건수_0() {
+        // given: 첫 호출로 값을 한 번 맞춰둔다
+        Performance performance = performanceRepository.save(
+                performance("변경없음 대상", PerformanceCategory.CONCERT, PerformanceStatus.UPCOMING, null));
+        Instant now = Instant.now();
+        schedule(performance, now.plus(10, ChronoUnit.DAYS), now.minus(1, ChronoUnit.DAYS), now.plus(9, ChronoUnit.DAYS));
+        performanceRepository.recalculateDerivedFields(now);
+
+        // when: 같은 now로 다시 호출한다 — 이미 반영된 값과 같아 바뀔 게 없다
+        int affected = performanceRepository.recalculateDerivedFields(now);
+
+        // then
+        assertThat(affected).isZero();
+    }
+
+    private void schedule(Performance performance, Instant showAt, Instant bookingOpenAt, Instant bookingCloseAt) {
+        scheduleRepository.save(Schedule.builder()
+                .performance(performance)
+                .showAt(showAt)
+                .bookingOpenAt(bookingOpenAt)
+                .bookingCloseAt(bookingCloseAt)
+                .build());
     }
 
     private Performance performance(String title, PerformanceCategory category, PerformanceStatus status,
