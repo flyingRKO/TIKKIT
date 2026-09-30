@@ -13,7 +13,11 @@ export function getRemainingMs(expiresAt: string | null): number {
 // - 숫자가 아닌 id는 BE에 보내지 않고 404 처리한다.
 // - NOT_FOUND는 없는 예약이거나 남의 예약이다(BE가 둘을 구분하지 않는다).
 // - proxy.ts는 쿠키 "존재"만 보기 때문에, 쿠키는 있는데 BE 세션이 만료된 경우는 여기서 UNAUTHORIZED로 걸러 로그인으로 보낸다.
-export async function loadReservation(reservationId: string): Promise<ReservationDetailResponse> {
+// loginRedirectPath: 세션이 만료됐을 때 로그인 후 돌아올 경로. 기본값은 결제 페이지다.
+export async function loadReservation(
+  reservationId: string,
+  loginRedirectPath: string = `/booking/${reservationId}`
+): Promise<ReservationDetailResponse> {
   if (!/^\d+$/.test(reservationId)) {
     notFound();
   }
@@ -26,7 +30,7 @@ export async function loadReservation(reservationId: string): Promise<Reservatio
         notFound();
       }
       if (error.code === "UNAUTHORIZED") {
-        redirect(`/login?redirect=${encodeURIComponent(`/booking/${reservationId}`)}`);
+        redirect(`/login?redirect=${encodeURIComponent(loginRedirectPath)}`);
       }
     }
     throw error;

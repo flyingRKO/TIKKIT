@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
 import {
+  cancelReservation,
   createReservation,
   getMyReservations,
   payReservation,
@@ -28,6 +29,12 @@ const PAY_ERROR_MESSAGES: Record<string, string> = {
   INVALID_STATUS_TRANSITION: "이미 처리된 예약입니다. 페이지를 새로고침해주세요.",
 };
 
+const CANCEL_ERROR_MESSAGES: Record<string, string> = {
+  CANCEL_DEADLINE_PASSED: "공연 24시간 전까지만 취소할 수 있습니다.",
+  INVALID_STATUS_TRANSITION: "이미 처리된 예약입니다. 페이지를 새로고침해주세요.",
+  NOT_FOUND: "예약을 찾을 수 없습니다.",
+};
+
 function toErrorMessage(error: unknown, messages: Record<string, string>): string {
   if (error instanceof ApiError) {
     return messages[error.code] ?? (error.errors.length > 0 ? error.errors.join(" ") : error.message);
@@ -48,7 +55,7 @@ async function findPendingReservationId(
   showAt: string,
   grade: string
 ): Promise<number | null> {
-  const pending = await getMyReservations("PENDING");
+  const pending = await getMyReservations({ status: "PENDING" });
   const showAtTime = new Date(showAt).getTime();
 
   const matched = pending.content.find(
@@ -139,4 +146,28 @@ export async function payReservationAction(
   }
 
   redirect(`/booking/${reservationId}/complete`);
+}
+
+export async function cancelReservationAction(
+  _prevState: ReservationActionState,
+  formData: FormData
+): Promise<ReservationActionState> {
+  const reservationId = Number(formData.get("reservationId"));
+
+  if (!isPositiveInteger(reservationId)) {
+    return { error: "잘못된 예약입니다." };
+  }
+
+  try {
+    await cancelReservation(reservationId);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "UNAUTHORIZED") {
+      redirect(`/login?redirect=${encodeURIComponent(`/my/reservations/${reservationId}`)}`);
+    }
+    return { error: toErrorMessage(error, CANCEL_ERROR_MESSAGES) };
+  }
+
+  // 취소하면 상태(취소/환불)와 재고가 바뀌므로, 캐시된 목록을 버리고 목록으로 보낸다.
+  revalidatePath("/my/reservations");
+  redirect("/my/reservations");
 }
