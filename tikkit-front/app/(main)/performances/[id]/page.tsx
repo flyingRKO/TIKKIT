@@ -34,7 +34,8 @@ export default async function PerformanceDetailPage({
   );
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-4 py-8 md:flex-row">
+    // pb-56: 모바일에서 하단 고정 CTA(에러 메시지 포함)가 본문·푸터를 가리지 않게 여유를 둔다
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-4 pt-8 pb-56 md:flex-row md:pb-8">
       <div className="flex flex-1 flex-col gap-4">
         <div className="flex items-center gap-1.5">
           <Badge variant="outline">{CATEGORY_LABELS[performance.category]}</Badge>
@@ -60,6 +61,8 @@ export default async function PerformanceDetailPage({
 
       <div className="w-full md:w-80">
         <TicketSelector
+          performanceId={performance.id}
+          performanceTitle={performance.title}
           schedules={performance.schedules}
           ticketGradesBySchedule={ticketGradesBySchedule}
         />
