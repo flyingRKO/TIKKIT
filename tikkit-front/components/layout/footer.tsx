@@ -5,7 +5,7 @@ export function Footer() {
         © 2026 TIKKIT — 포트폴리오 프로젝트 ·{" "}
         <a
           href="https://github.com/flyingRKO/TIKKIT"
-          className="underline underline-offset-4 hover:text-foreground"
+          className="underline underline-offset-4 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           target="_blank"
           rel="noreferrer"
         >

@@ -1,8 +1,11 @@
+import Link from "next/link";
+import { EmptyState } from "@/components/layout/empty-state";
 import { CategoryFilter } from "@/components/performance/category-filter";
 import { Pagination } from "@/components/performance/pagination";
 import { PerformanceCard } from "@/components/performance/performance-card";
 import { SearchForm } from "@/components/performance/search-form";
 import { StatusFilter } from "@/components/performance/status-filter";
+import { buttonVariants } from "@/components/ui/button";
 import { getPerformances } from "@/lib/api/performances";
 import { CATEGORY_OPTIONS, STATUS_OPTIONS } from "@/lib/performance-labels";
 import type { PerformanceCategory, PerformanceStatus } from "@/types/api";
@@ -34,6 +37,7 @@ export default async function PerformancesPage({
   const keyword = firstOf(params.keyword);
   const status = parseStatus(firstOf(params.status));
   const page = Math.max(0, Number(firstOf(params.page)) || 0);
+  const hasFilter = Boolean(category || keyword || status);
 
   const {
     content,
@@ -52,13 +56,26 @@ export default async function PerformancesPage({
       </div>
 
       {content.length === 0 ? (
-        <p className="py-16 text-center text-muted-foreground">조건에 맞는 공연이 없습니다.</p>
+        <EmptyState
+          message={hasFilter ? "조건에 맞는 공연이 없습니다." : "등록된 공연이 없습니다."}
+          action={
+            hasFilter && (
+              <Link href="/performances" className={buttonVariants({ variant: "outline" })}>
+                필터 초기화
+              </Link>
+            )
+          }
+        />
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-          {content.map((performance) => (
-            <PerformanceCard key={performance.id} performance={performance} />
-          ))}
-        </div>
+        <>
+          {/* 카드 제목이 h3라서 h1 바로 아래에 h2가 없으면 제목 단계가 건너뛴다. 화면에는 보이지 않는 h2를 둔다 */}
+          <h2 className="sr-only">공연 검색 결과</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+            {content.map((performance) => (
+              <PerformanceCard key={performance.id} performance={performance} />
+            ))}
+          </div>
+        </>
       )}
 
       <Pagination currentSearchParams={params} page={currentPage} totalPages={totalPages} />

@@ -138,10 +138,14 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 ### Phase 4: MVP 안정화 및 릴리스
 
-- **Task 016: [FE] UX 완성도 점검**
-  - 360/768/1280px 반응형 점검
-  - 다크모드 대비, 빈 상태·에러·스켈레톤 상태 점검
-  - 기본 접근성 점검 (label, focus ring)
+- **Task 016: [FE] UX 완성도 점검** ✅ - 완료
+  - ✅ 360/768/1280px 반응형 점검: 긴 텍스트 줄바꿈(`min-w-0 break-words`), 카드 배지 `flex-wrap`, 터치 영역 확대(수량 버튼 32px, 상태 필터 28px)
+  - ✅ 다크모드 대비, 빈 상태·에러·스켈레톤 상태 점검: `components/ui/skeleton.tsx`와 loading.tsx 추가(홈은 섹션별 `Suspense`), `(main)/error.tsx`·`not-found.tsx`·`global-error.tsx` 추가, `EmptyState`·`FormError` 공통 컴포넌트, 다이얼로그 오버레이 다크 대비
+  - ✅ 기본 접근성 점검 (label, focus ring): skip link, 검색창 `aria-label`, 공통 `focusRing`, MobileNav(`aria-expanded`·Esc·경로 변경 시 닫기), `aria-current="page"`, 제목 레벨 정리, 로그인·회원가입 `<main>` 랜드마크, `eslint-plugin-jsx-a11y` recommended 적용
+  - ✅ API 래퍼 에러 정규화(`lib/api/client.ts`): 네트워크 실패는 `NETWORK_ERROR`, JSON이 아닌 응답은 `INVALID_RESPONSE`로 바꿔서 폼은 인라인 에러, BE가 꺼져도 Header는 로그인 영역만 숨기고 유지
+  - ✅ 브라우저 시나리오 검증 (15개 페이지×폭 조합 가로 넘침, 예매→결제→취소, 빈 상태, 404, BE 다운 시 에러 화면·로그인 인라인 에러, "다시 시도" 복구, Tab 키보드 이동, 라이트·다크)
+  - 알려진 한계: 서버에서 던진 에러는 프로덕션에서 `message`·`code`가 지워져 error.tsx에서 연결 문제를 구분할 수 없어 일반 문구를 쓴다. `unstable_retry`는 unstable API다. 모바일 하단 고정 CTA는 스크롤 끝에서 푸터를 가린다. 루트 `app/not-found.tsx`·`error.tsx`에는 헤더와 `<main>`이 없다
+  - 별도 처리 필요: `lib/format-date.ts`가 서버에서 `PM 10:59`, 브라우저에서 `오후 10:59`로 렌더링해 상세 페이지에서 하이드레이션 불일치가 난다 (Task 010부터 있던 문제)
 - **Task 017: [공통] E2E 테스트 및 v0.1.0-mvp 릴리스**
   - Playwright: 회원가입 → 탐색 → 선점 → 결제 → 취소 시나리오
   - README 완성 (스크린샷, 아키텍처 다이어그램, "알려진 한계: 동시성" 섹션)
@@ -241,8 +245,10 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 |---|---|---|
 | primary (보라) | oklch(0.52 0.24 295) | oklch(0.68 0.20 295) |
 | accent (옅은 핑크 틴트) | oklch(0.95 0.03 350) | oklch(0.30 0.06 350) |
-| highlight (강한 핑크) | oklch(0.60 0.22 355) | oklch(0.72 0.20 355) |
-| destructive | oklch(0.577 0.245 27.3) | oklch(0.704 0.191 22.2) |
+| highlight (강한 핑크) | oklch(0.58 0.22 355) | oklch(0.72 0.20 355) |
+| destructive | oklch(0.52 0.245 27.3) | oklch(0.704 0.191 22.2) |
+
+- Task 016에서 라이트 모드 highlight(0.60→0.58)·destructive(0.577→0.52)의 명도를 낮춰 텍스트 대비 4.5:1(WCAG AA)을 맞췄다. 알려진 한계: `--border`/`--input`은 배경 대비가 1.2~1.5:1이라 입력창 테두리의 비텍스트 대비 기준(3:1)에는 못 미친다. shadcn 기본값이고 전체 톤이 바뀌는 사항이라 이번에는 두지 않았다.
 
 - 그라디언트(`from-primary to-highlight`)는 로고, 메인 히어로, 예매/결제 CTA, 대기열 진행바에만 사용하고 본문·큰 배경에는 쓰지 않는다.
 - 다크모드는 next-themes의 class 전략 + `@custom-variant dark (&:is(.dark *))`로 구현한다.
@@ -260,5 +266,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-09-30
-**📊 진행 상황**: Phase 3 완료 (15/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-01
+**📊 진행 상황**: Phase 4 진행 중 (16/33 Tasks 완료)

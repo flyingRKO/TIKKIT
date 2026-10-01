@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cn } from "cn";
+import { cn, focusRing } from "@/lib/utils";
 import { STATUS_LABELS, STATUS_OPTIONS } from "@/lib/performance-labels";
 import { withSearchParams } from "@/lib/url";
 import type { PerformanceStatus } from "@/types/api";
@@ -24,12 +24,13 @@ export function StatusFilter({ currentSearchParams, activeStatus }: StatusFilter
             key={option.label}
             href={withSearchParams(currentSearchParams, { status: option.status, page: undefined })}
             className={cn(
-              "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+              "rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+              focusRing,
               isActive
                 ? "border-primary text-primary"
                 : "border-border text-muted-foreground hover:text-foreground"
             )}
-            aria-current={isActive ? "true" : undefined}
+            aria-current={isActive ? "page" : undefined}
           >
             {option.label}
           </Link>

@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { FormError } from "@/components/layout/form-error";
 import { Button } from "@/components/ui/button";
 import { cancelReservationAction } from "@/lib/actions/reservation";
 import { initialReservationActionState } from "@/lib/actions/reservation-state";
@@ -52,11 +53,7 @@ export function CancelReservationButton({
                 : "선점한 좌석이 해제됩니다. "}
               취소한 예매는 되돌릴 수 없습니다.
             </AlertDialogDescription>
-            {state.error && (
-              <p role="alert" className="text-sm text-destructive">
-                {state.error}
-              </p>
-            )}
+            <FormError message={state.error} />
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pending}>돌아가기</AlertDialogCancel>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { logoutAction } from "@/lib/actions/auth";
-import { cn } from "cn";
+import { cn, focusRing } from "@/lib/utils";
 import type { MemberResponse } from "@/types/api";
 
 interface AuthStatusProps {
@@ -8,7 +8,10 @@ interface AuthStatusProps {
   className?: string;
 }
 
-const LINK_CLASS = "text-sm font-medium text-muted-foreground hover:text-foreground";
+const LINK_CLASS = cn(
+  "text-sm font-medium text-muted-foreground hover:text-foreground",
+  focusRing
+);
 
 export function AuthStatus({ member, className }: AuthStatusProps) {
   if (!member) {

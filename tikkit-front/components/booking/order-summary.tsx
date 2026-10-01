@@ -8,10 +8,10 @@ export function OrderSummary({ reservation }: { reservation: ReservationDetailRe
   return (
     <section className="flex flex-col gap-3 rounded-xl border p-4">
       <h2 className="text-sm font-semibold">주문 요약</h2>
-      <p className="text-lg font-bold">{reservation.performanceTitle}</p>
+      <p className="break-words text-lg font-bold">{reservation.performanceTitle}</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
         <dt className="text-muted-foreground">예약번호</dt>
-        <dd className="text-right">{reservation.reservationNo}</dd>
+        <dd className="min-w-0 break-words text-right">{reservation.reservationNo}</dd>
         <dt className="text-muted-foreground">관람 일시</dt>
         <dd className="text-right">{formatDateTime(reservation.scheduleShowAt)}</dd>
         <dt className="text-muted-foreground">등급</dt>

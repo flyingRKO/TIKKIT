@@ -17,7 +17,7 @@ export function ReservationListItem({ reservation }: { reservation: ReservationS
         className="flex flex-col gap-2 rounded-xl border p-4 transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <div className="flex items-start justify-between gap-2">
-          <p className="font-semibold">{reservation.performanceTitle}</p>
+          <p className="min-w-0 break-words font-semibold">{reservation.performanceTitle}</p>
           <Badge variant={RESERVATION_STATUS_BADGE_VARIANTS[reservation.status]}>
             {RESERVATION_STATUS_LABELS[reservation.status]}
           </Badge>

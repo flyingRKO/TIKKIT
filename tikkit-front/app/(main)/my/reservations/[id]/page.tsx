@@ -12,7 +12,7 @@ import {
   RESERVATION_STATUS_BADGE_VARIANTS,
   RESERVATION_STATUS_LABELS,
 } from "@/lib/reservation-labels";
-import { cn } from "cn";
+import { cn, focusRing } from "@/lib/utils";
 
 export default async function MyReservationDetailPage({
   params,
@@ -27,7 +27,10 @@ export default async function MyReservationDetailPage({
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-6 px-4 py-8">
       <div className="flex flex-col gap-3">
-        <Link href="/my/reservations" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/my/reservations"
+          className={cn("text-sm text-muted-foreground hover:text-foreground", focusRing)}
+        >
           ← 예매 내역
         </Link>
         <div className="flex items-center gap-2">

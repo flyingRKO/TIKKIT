@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cn } from "cn";
+import { cn, focusRing } from "@/lib/utils";
 import { withSearchParams } from "@/lib/url";
 
 interface PaginationProps {
@@ -48,6 +48,7 @@ function PageLink({
 }) {
   const className = cn(
     "rounded-md px-3 py-1.5 text-sm font-medium",
+    focusRing,
     disabled ? "pointer-events-none text-muted-foreground/50" : "hover:bg-muted"
   );
 
