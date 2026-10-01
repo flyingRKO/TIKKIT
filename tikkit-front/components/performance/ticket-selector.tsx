@@ -1,12 +1,13 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { FormError } from "@/components/layout/form-error";
 import { Button } from "@/components/ui/button";
 import { createReservationAction } from "@/lib/actions/reservation";
 import { initialReservationActionState } from "@/lib/actions/reservation-state";
 import { formatDateTime } from "@/lib/format-date";
 import { GRADE_LABELS } from "@/lib/performance-labels";
-import { cn } from "cn";
+import { cn, focusRing } from "@/lib/utils";
 import type { ScheduleSummaryResponse, TicketGradeResponse } from "@/types/api";
 
 const MAX_QUANTITY = 4;
@@ -80,7 +81,7 @@ export function TicketSelector({
       <input type="hidden" name="quantity" value={quantity} />
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold">회차 선택</h3>
+        <h2 className="text-sm font-semibold">회차 선택</h2>
         <div className="flex flex-col gap-1.5">
           {schedules.map((schedule) => {
             const saleState = getSaleState(schedule, now);
@@ -92,6 +93,7 @@ export function TicketSelector({
                 onClick={() => handleSelectSchedule(schedule.id)}
                 className={cn(
                   "flex flex-col rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                  focusRing,
                   scheduleId === schedule.id
                     ? "border-primary bg-primary/5 text-foreground"
                     : "border-border text-muted-foreground hover:text-foreground"
@@ -110,9 +112,9 @@ export function TicketSelector({
       </section>
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold">등급 선택</h3>
+        <h2 className="text-sm font-semibold">등급 선택</h2>
         {grades.length === 0 ? (
-          <p className="text-sm text-muted-foreground">등급 정보를 불러오지 못했습니다.</p>
+          <p className="text-sm text-muted-foreground">판매 중인 등급이 없습니다.</p>
         ) : (
           <div className="flex flex-col gap-1.5">
             {grades.map((grade) => {
@@ -125,6 +127,7 @@ export function TicketSelector({
                   onClick={() => handleSelectGrade(grade)}
                   className={cn(
                     "flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                    focusRing,
                     gradeId === grade.id
                       ? "border-primary bg-primary/5"
                       : "border-border hover:text-foreground"
@@ -144,12 +147,12 @@ export function TicketSelector({
 
       {selectedGrade && (
         <section className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">수량</h3>
+          <h2 className="text-sm font-semibold">수량</h2>
           <div className="flex items-center gap-2">
             <Button
               type="button"
               variant="outline"
-              size="icon-sm"
+              size="icon"
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
               disabled={quantity <= 1}
               aria-label="수량 감소"
@@ -160,7 +163,7 @@ export function TicketSelector({
             <Button
               type="button"
               variant="outline"
-              size="icon-sm"
+              size="icon"
               onClick={() =>
                 setQuantity((q) => Math.min(MAX_QUANTITY, selectedGrade.remainingQuantity, q + 1))
               }
@@ -175,11 +178,7 @@ export function TicketSelector({
 
       {/* 모바일은 화면 하단에 고정하고, md 이상에서는 카드 안에 그대로 둔다 */}
       <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-3 border-t bg-background p-4 md:static md:z-auto md:border-t md:bg-transparent md:px-0 md:pb-0">
-        {state.error && (
-          <p role="alert" className="text-sm text-destructive">
-            {state.error}
-          </p>
-        )}
+        <FormError message={state.error} />
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">합계</span>
           <span className="text-lg font-bold">{totalPrice.toLocaleString()}원</span>

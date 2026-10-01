@@ -43,10 +43,10 @@ export default async function PerformanceDetailPage({
             {STATUS_LABELS[performance.status]}
           </Badge>
         </div>
-        <h1 className="text-2xl font-bold">{performance.title}</h1>
+        <h1 className="break-words text-2xl font-bold">{performance.title}</h1>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <dt>공연장</dt>
-          <dd>
+          <dd className="min-w-0 break-words">
             {performance.venueName} · {performance.venueAddress}
           </dd>
           <dt>러닝타임</dt>

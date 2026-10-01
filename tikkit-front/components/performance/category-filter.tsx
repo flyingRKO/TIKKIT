@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cn } from "cn";
+import { cn, focusRing } from "@/lib/utils";
 import { CATEGORY_LABELS, CATEGORY_OPTIONS } from "@/lib/performance-labels";
 import { withSearchParams } from "@/lib/url";
 import type { PerformanceCategory } from "@/types/api";
@@ -25,11 +25,12 @@ export function CategoryFilter({ currentSearchParams, activeCategory }: Category
             href={withSearchParams(currentSearchParams, { category: tab.category, page: undefined })}
             className={cn(
               "rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
+              focusRing,
               isActive
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:text-foreground"
             )}
-            aria-current={isActive ? "true" : undefined}
+            aria-current={isActive ? "page" : undefined}
           >
             {tab.label}
           </Link>

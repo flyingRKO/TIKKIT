@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LoginForm } from "@/components/auth/login-form";
+import { cn, focusRing } from "@/lib/utils";
 
 export default async function LoginPage({
   searchParams,
@@ -17,7 +18,7 @@ export default async function LoginPage({
         아직 계정이 없으신가요?{" "}
         <Link
           href={`/signup?redirect=${encodeURIComponent(redirectTo)}`}
-          className="font-medium text-primary hover:underline"
+          className={cn("font-medium text-primary hover:underline", focusRing)}
         >
           회원가입
         </Link>

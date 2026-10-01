@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { EmptyState } from "@/components/layout/empty-state";
 import { Pagination } from "@/components/performance/pagination";
 import { ReservationListItem } from "@/components/reservation/reservation-list-item";
 import { ReservationStatusFilter } from "@/components/reservation/reservation-status-filter";
@@ -56,16 +57,16 @@ export default async function MyReservationsPage({
       <ReservationStatusFilter currentSearchParams={params} activeStatus={status} />
 
       {content.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 py-16 text-center">
-          <p className="text-muted-foreground">
-            {status ? "해당 상태의 예매 내역이 없습니다." : "아직 예매 내역이 없습니다."}
-          </p>
-          {!status && (
-            <Link href="/performances" className={cn(buttonVariants({ size: "lg" }))}>
-              공연 둘러보기
-            </Link>
-          )}
-        </div>
+        <EmptyState
+          message={status ? "해당 상태의 예매 내역이 없습니다." : "아직 예매 내역이 없습니다."}
+          action={
+            !status && (
+              <Link href="/performances" className={cn(buttonVariants({ size: "lg" }))}>
+                공연 둘러보기
+              </Link>
+            )
+          }
+        />
       ) : (
         <ul className="flex flex-col gap-3">
           {content.map((reservation) => (
