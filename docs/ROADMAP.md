@@ -149,7 +149,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 - **Task 017: [공통] E2E 테스트 및 v0.1.0-mvp 릴리스** ✅ - 완료
   - ✅ Playwright 도입(`playwright.config.ts`, chromium만 사용): 같은 DB를 공유하므로 `workers: 1`로 순차 실행하고, `e2e`(회귀)와 `screenshots`(README용) 프로젝트를 분리. FE는 `webServer`가 `next start`로 띄우고 BE(dev 프로필)와 DB는 밖에서 띄운다. BE 호출이 전부 Next 서버 쪽에서 일어나 `page.route`로 목킹할 수 없어서 실제 BE를 쓴다
   - ✅ 시나리오 `e2e/booking-flow.spec.ts`: 회원가입 → 로그인 → 예매중 공연 선택 → 선점 → 결제 → 예매 내역 → 취소(환불). 매번 새 회원으로 가입해 중복 선점(409)을 피하고, 끝에 취소해서 재고를 되돌린다. 공연 id는 고정하지 않고 `?status=ON_SALE` 목록의 첫 카드를 쓴다. `e2e/auth-guard.spec.ts`: 비로그인으로 `/my`, `/booking` 접근 시 `/login?redirect=`로 이동
-  - ✅ `.github/workflows/ci.yml`에 `e2e` 잡 추가: Postgres 서비스 컨테이너 + `bootJar`로 BE 기동(`/api/v1/performances`로 기동 대기) + FE 빌드 후 Playwright 실행. 실패 시 리포트와 BE 로그를 artifact로 업로드. 로컬에서 jar 기동과 대기 명령은 확인했고, 러너에서의 실제 실행은 PR에서 확인한다
+  - ✅ `.github/workflows/ci.yml`에 `e2e` 잡 추가: Postgres 서비스 컨테이너 + `bootJar`로 BE 기동(`/api/v1/performances`로 기동 대기) + FE 빌드 후 Playwright 실행. 실패 시 리포트와 BE 로그를 artifact로 업로드. PR #12의 CI 러너에서 첫 실행에 테스트 3개가 통과했다(잡 약 2분)
   - ✅ README 완성: 스크린샷 6장(`docs/images/`, `npm run screenshots`로 재생성), mermaid 아키텍처 다이어그램, E2E 실행 방법. "알려진 한계" 섹션 3개(동시성, 결제-만료 배치 경쟁, PG 호출 트랜잭션)는 기존 것을 유지
   - `v0.1.0-mvp` 태그 생성 (PR 머지 후 main에서 생성)
   - 알려진 한계: 시드 공연 날짜가 "시드 적용 시점" 기준이라 같은 DB를 약 50일 넘게 쓰면 예매중 공연이 없어져 E2E가 실패한다(`docker-compose down -v`로 초기화). E2E가 가입시킨 회원은 DB에 남는다(삭제 API 없음). 시드에 포스터 URL이 없어 스크린샷의 포스터는 placeholder다
