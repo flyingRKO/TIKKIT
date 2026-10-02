@@ -136,7 +136,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 브라우저 시나리오 검증 (필터·페이지네이션, PENDING/CONFIRMED 취소·환불, 24시간 이내 취소 불가, 서버 마감 거절 시 다이얼로그 내 에러, 404, 세션 만료, 360px)
   - 알려진 한계: 목록 응답에 `expiresAt`이 없어 만료 배치가 돌기 전(최대 60초)에는 만료된 선점이 "결제 대기"로 보일 수 있다. 24시간 취소 규칙은 BE 규칙의 복사본이라 BE 규칙이 바뀌면 `CANCEL_DEADLINE_MS`도 같이 고쳐야 한다
 
-### Phase 4: MVP 안정화 및 릴리스
+### Phase 4: MVP 안정화 및 릴리스 ✅
 
 - **Task 016: [FE] UX 완성도 점검** ✅ - 완료
   - ✅ 360/768/1280px 반응형 점검: 긴 텍스트 줄바꿈(`min-w-0 break-words`), 카드 배지 `flex-wrap`, 터치 영역 확대(수량 버튼 32px, 상태 필터 28px)
@@ -146,10 +146,13 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 브라우저 시나리오 검증 (15개 페이지×폭 조합 가로 넘침, 예매→결제→취소, 빈 상태, 404, BE 다운 시 에러 화면·로그인 인라인 에러, "다시 시도" 복구, Tab 키보드 이동, 라이트·다크)
   - 알려진 한계: 서버에서 던진 에러는 프로덕션에서 `message`·`code`가 지워져 error.tsx에서 연결 문제를 구분할 수 없어 일반 문구를 쓴다. `unstable_retry`는 unstable API다. 모바일 하단 고정 CTA는 스크롤 끝에서 푸터를 가린다. 루트 `app/not-found.tsx`·`error.tsx`에는 헤더와 `<main>`이 없다
   - 후속 수정 완료: `lib/format-date.ts`가 서버에서 `PM 10:59`, 브라우저에서 `오후 10:59`로 렌더링해 상세 페이지에서 하이드레이션 불일치가 나던 문제(Task 010부터 있던 문제)는 `formatToParts()`로 오전/오후를 직접 지정해 해결했다
-- **Task 017: [공통] E2E 테스트 및 v0.1.0-mvp 릴리스**
-  - Playwright: 회원가입 → 탐색 → 선점 → 결제 → 취소 시나리오
-  - README 완성 (스크린샷, 아키텍처 다이어그램, "알려진 한계: 동시성" 섹션)
-  - `v0.1.0-mvp` 태그 생성
+- **Task 017: [공통] E2E 테스트 및 v0.1.0-mvp 릴리스** ✅ - 완료
+  - ✅ Playwright 도입(`playwright.config.ts`, chromium만 사용): 같은 DB를 공유하므로 `workers: 1`로 순차 실행하고, `e2e`(회귀)와 `screenshots`(README용) 프로젝트를 분리. FE는 `webServer`가 `next start`로 띄우고 BE(dev 프로필)와 DB는 밖에서 띄운다. BE 호출이 전부 Next 서버 쪽에서 일어나 `page.route`로 목킹할 수 없어서 실제 BE를 쓴다
+  - ✅ 시나리오 `e2e/booking-flow.spec.ts`: 회원가입 → 로그인 → 예매중 공연 선택 → 선점 → 결제 → 예매 내역 → 취소(환불). 매번 새 회원으로 가입해 중복 선점(409)을 피하고, 끝에 취소해서 재고를 되돌린다. 공연 id는 고정하지 않고 `?status=ON_SALE` 목록의 첫 카드를 쓴다. `e2e/auth-guard.spec.ts`: 비로그인으로 `/my`, `/booking` 접근 시 `/login?redirect=`로 이동
+  - ✅ `.github/workflows/ci.yml`에 `e2e` 잡 추가: Postgres 서비스 컨테이너 + `bootJar`로 BE 기동(`/api/v1/performances`로 기동 대기) + FE 빌드 후 Playwright 실행. 실패 시 리포트와 BE 로그를 artifact로 업로드. PR #12의 CI 러너에서 첫 실행에 테스트 3개가 통과했다(잡 약 2분)
+  - ✅ README 완성: 스크린샷 6장(`docs/images/`, `npm run screenshots`로 재생성), mermaid 아키텍처 다이어그램, E2E 실행 방법. "알려진 한계" 섹션 3개(동시성, 결제-만료 배치 경쟁, PG 호출 트랜잭션)는 기존 것을 유지
+  - `v0.1.0-mvp` 태그 생성 (PR 머지 후 main에서 생성)
+  - 알려진 한계: 시드 공연 날짜가 "시드 적용 시점" 기준이라 같은 DB를 약 50일 넘게 쓰면 예매중 공연이 없어져 E2E가 실패한다(`docker-compose down -v`로 초기화). E2E가 가입시킨 회원은 DB에 남는다(삭제 API 없음). 시드에 포스터 URL이 없어 스크린샷의 포스터는 placeholder다
 
 ### Phase 5: 동시성 제어 고도화
 
@@ -266,5 +269,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-01
-**📊 진행 상황**: Phase 4 진행 중 (16/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-02
+**📊 진행 상황**: Phase 4 완료 (17/33 Tasks 완료)

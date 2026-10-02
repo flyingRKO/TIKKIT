@@ -6,7 +6,19 @@
 
 ## 진행 상황
 
-**Phase 3 진행 중 (12/33 Task 완료)** — 예매 선점(PENDING 홀드) API까지 붙어서 실제 좌석 재고를 검증하며 예매 화면을 이어서 만들 수 있습니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**MVP 완성 (`v0.1.0-mvp`) — Phase 0~4 완료, 17/33 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고, 이 흐름은 Playwright E2E로 CI에서 검증합니다. 다음은 Phase 5(동시성 제어 고도화)입니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+
+## 스크린샷
+
+| 메인 | 공연 상세 | 공연 상세 (모바일 360px) |
+|---|---|---|
+| <img src="docs/images/01-home.png" alt="메인 화면"> | <img src="docs/images/02-performance-detail.png" alt="공연 상세 화면"> | <img src="docs/images/03-performance-detail-mobile.png" alt="모바일 공연 상세 화면"> |
+
+| 결제 | 예매 완료 | 예매 내역 |
+|---|---|---|
+| <img src="docs/images/04-booking-payment.png" alt="결제 화면"> | <img src="docs/images/05-booking-complete.png" alt="예매 완료 화면"> | <img src="docs/images/06-my-reservations.png" alt="예매 내역 화면"> |
+
+스크린샷은 `npm run screenshots`로 다시 만들 수 있습니다 ([E2E 테스트](#e2e-테스트) 참고). 포스터 이미지는 시드 데이터에 URL이 없어서 placeholder로 표시됩니다.
 
 ## 문서
 
@@ -14,7 +26,7 @@
 |---|---|
 | [`docs/PRD.md`](docs/PRD.md) | MVP 요구사항, 기능 명세, API 계약 |
 | [`docs/ERD.md`](docs/ERD.md) | DB 스키마, 정규화·동시성·마이그레이션 설계 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0~9, Task 001~032 개발 로드맵 |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0~9, Task 001~033 개발 로드맵 |
 
 ## 기술 스택
 
@@ -22,15 +34,43 @@
 |---|---|
 | 프론트엔드 | Next.js 16.2.3 (App Router), React 19.2.4, TypeScript 5, TailwindCSS v4 |
 | 백엔드 | Spring Boot 3.4.5, Java 21, Spring Data JPA + QueryDSL + MyBatis |
-| 데이터베이스 | PostgreSQL 15 (Docker) |
+| 데이터베이스 | PostgreSQL 15 (Docker), Flyway |
+| 테스트·CI | JUnit 5 + Testcontainers (BE), Playwright (E2E), GitHub Actions |
+
+## 아키텍처
+
+```mermaid
+flowchart LR
+    Browser["브라우저"]
+
+    subgraph FE["tikkit-front (Next.js 서버, :3000)"]
+        Next["Server Component / Server Action<br/>proxy.ts: /booking, /my 접근 보호<br/>JSESSIONID를 httpOnly 쿠키로 저장"]
+    end
+
+    subgraph BE["tikkit-back (Spring Boot, :8080)"]
+        Spring["Controller → Service → Repository<br/>Spring Security (HttpSession 세션 인증)"]
+        Batch["@Scheduled 배치 (60초)<br/>선점 만료, 공연 상태 재계산"]
+    end
+
+    DB[("PostgreSQL 15<br/>Flyway 마이그레이션")]
+
+    Browser -->|"페이지 요청 / Server Action"| Next
+    Next -->|"REST /api/v1/*<br/>Cookie: JSESSIONID 중계"| Spring
+    Spring -->|"JPA / QueryDSL"| DB
+    Batch -->|"만료 처리 + 재고 복원 (SQL 한 문장)"| DB
+```
+
+- 브라우저는 BE를 직접 호출하지 않습니다. BE 호출은 전부 Next 서버(Server Component, Server Action)에서 일어나고, 로그인 세션 쿠키도 Next가 받아서 BE로 그대로 중계합니다.
+- 인증은 서버 메모리의 `HttpSession`을 씁니다. 서버를 여러 대로 늘릴 때 생기는 문제와 대안(Redis 세션/JWT)은 Phase 7(Task 026)에서 다룹니다.
+- 선점 후 10분 안에 결제하지 않은 예약은 만료 배치가 정리하고 재고를 복원합니다.
 
 ## 프로젝트 구조
 
 ```
 TIKKIT/
-├── tikkit-front/   # Next.js 프론트엔드
+├── tikkit-front/   # Next.js 프론트엔드 (e2e/: Playwright 테스트)
 ├── tikkit-back/    # Spring Boot 백엔드
-└── docs/           # PRD, ERD, ROADMAP
+└── docs/           # PRD, ERD, ROADMAP, 스크린샷(images/)
 ```
 
 ## 로컬 개발 환경
@@ -58,6 +98,22 @@ cd tikkit-front
 npm install
 npm run dev              # http://localhost:3000
 ```
+
+### E2E 테스트
+
+가입 → 로그인 → 선점 → 결제 → 취소 흐름을 실제 브라우저로 검증합니다. BE를 목킹하지 않고 실제 BE와 DB를 쓰기 때문에, **BE를 dev 프로필로 먼저 띄워 둬야 합니다** (공연 시드 데이터가 dev 프로필에서만 들어갑니다).
+
+```bash
+cd tikkit-front
+npx playwright install chromium   # 최초 1회
+npm run build                     # E2E는 프로덕션 빌드(next start)로 돌립니다
+npm run test:e2e                  # 회귀 테스트
+npm run screenshots               # README용 스크린샷 재생성 (docs/images/)
+```
+
+- 시드 공연의 날짜는 "시드를 적용한 시점" 기준 상대 날짜입니다. 같은 DB를 오래 쓰면 공연이 하나씩 판매 종료되고, 적용한 지 약 50일이 지나면 예매중 공연이 하나도 남지 않아 테스트가 실패합니다. 이때는 `docker-compose down -v`로 볼륨까지 지우고 다시 띄우세요.
+- 테스트는 매번 새 회원(`e2e-{timestamp}@tikkit.com`)으로 가입하고 마지막에 예약을 취소해서 재고를 되돌립니다. 가입한 회원은 DB에 남습니다.
+- CI에서는 `e2e` 잡이 Postgres 서비스 컨테이너를 매번 새로 만들어서 같은 순서로 실행합니다. `screenshots`는 CI에서 돌리지 않습니다.
 
 ## 포트폴리오 포인트 (예정)
 
