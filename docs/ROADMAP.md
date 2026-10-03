@@ -156,11 +156,16 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 ### Phase 5: 동시성 제어 고도화
 
-- **Task 018: [BE] 초과 판매 재현 테스트**
-  - 좌석 10석에 100개 스레드로 동시 요청 (ExecutorService + CountDownLatch), 테스트가 실패하며 초과 판매를 재현
-  - 결제-만료 배치 간 경쟁 상태도 재현
-  - 결과 기록 (예약 건수 vs 총 재고)
-  - `docs/improvements/001-overselling-reproduction.md` 작성
+- **Task 018: [BE] 초과 판매 재현 테스트** ✅ - 완료
+  - ✅ 좌석 10석에 100개 스레드로 동시 요청 (ExecutorService + 출발선 CountDownLatch), 초과 판매 재현. 4회 반복 모두 **100건 전원 성공(판매 100매 vs 총재고 10)**, `SOLD_OUT` 0건. 동시 진입한 트랜잭션들이 같은 값을 읽고 전부 `값-1`을 절대값으로 쓰므로 재고가 "세대당 1"씩만 줄어 재고 부족 검증이 아예 발동하지 않는다
+  - ✅ 결제-만료 배치 간 경쟁 재현. 테스트 전용 `PaymentGateway`로 **실제 PG 승인 지연(5초)을 모사**하고 홀드가 그 사이에 끝나게 두는 방식 — 래치로 순서를 강제하면 "실제로 일어나는가"에 답할 수 없기 때문이다. 3회 모두 예약 CONFIRMED + 결제 PAID + 재고 복원(10/10)으로 불변식이 깨졌다
+  - ✅ 결과 기록 (예약 수량 합 vs 총 재고). 초과 판매는 **재고 음수로 나타나지 않는다** — `ck_ticket_grades_remaining_range`는 항상 통과하므로 검증 지표를 `SUM(reservations.quantity)` vs `total_quantity`로 잡았다
+  - ✅ **테스트는 "현재의 잘못된 동작"을 단정해 CI를 초록으로 유지**한다(`@Disabled`·`@Tag` 미사용). Task 019에서 단정만 뒤집으면 PR diff에 개선이 그대로 드러난다. 뒤집을 지점은 테스트 코드에 주석으로 표시
+  - ✅ `@Transactional` 없는 전용 베이스(`support/AbstractConcurrencyTest`) 추가: 테스트 스레드의 미커밋 데이터는 워커 스레드에서 안 보여 롤백 격리로는 경쟁 자체를 만들 수 없다. 데이터를 커밋하고 `TRUNCATE ... RESTART IDENTITY CASCADE`로 정리하며, 커넥션 풀은 `@TestPropertySource`로 이 클래스만 30으로 올려 기존 테스트 20개에 영향을 주지 않는다
+  - ✅ 회원 100명을 미리 만든다 — 중복 선점 가드가 `(회원, 등급, PENDING)` 단위라 같은 회원으로 100번 쏘면 1건만 성공하고 99건이 `DUPLICATE_PENDING_RESERVATION`으로 떨어져 재현되지 않는다. signup/login API를 100번 타면 BCrypt가 200번 돌아서, 인코딩을 1회로 줄이고 세션에 `SecurityContext`를 직접 심었다
+  - ✅ `.github/workflows/ci.yml`의 `backend` 잡에 `timeout-minutes: 15` 추가 (동시성 테스트가 멈출 때 러너를 360분 점유하는 것을 막는다)
+  - ✅ `docs/improvements/001-overselling-reproduction.md` 작성 (해결안 비교 절은 Task 019에서 채운다)
+  - 알려진 한계: 재현이 커넥션 풀 크기에 의존한다 — 풀을 1로 줄이면 완전히 직렬 실행되어 초과 판매가 나지 않는다. 현재 설정(30)에서 4회 모두 100건이 성공했고 단정 임계값은 11건이라 여유가 크지만, CI 러너에서 분포가 달라지면 임계값을 재측정해야 한다. 시나리오 B는 10분을 기다릴 수 없어 `expires_at`을 SQL로 당기고, 스케줄러가 test 프로필에서 꺼져 있어 만료 배치 본체를 직접 호출한다. 취소와 만료가 겹치는 재고 이중 복원(`increaseRemaining`에 상한 검증 없음 → CHECK 위반 가능)은 재현하지 않고 Task 019 대상으로 남긴다
 - **Task 019: [BE] DB 락 전략 적용 및 비교**
   - 비관적 락 (`@Lock(PESSIMISTIC_WRITE)`) 적용
   - 낙관적 락 (`V3__add_version_to_ticket_grades.sql` + 재시도 로직) 적용
@@ -269,5 +274,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-02
-**📊 진행 상황**: Phase 4 완료 (17/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-03
+**📊 진행 상황**: Phase 4 완료, Phase 5 진행 중 (18/33 Tasks 완료)
