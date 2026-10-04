@@ -10,6 +10,8 @@ import com.tikkit.api.domain.performance.entity.TicketGrade;
 import com.tikkit.api.domain.venue.entity.Venue;
 import com.tikkit.api.domain.venue.repository.VenueRepository;
 import com.tikkit.api.support.AbstractContainerTest;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,9 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
     private ScheduleRepository scheduleRepository;
     @Autowired
     private TicketGradeRepository ticketGradeRepository;
+
+    @PersistenceContext
+    private EntityManager em;
 
     private Schedule schedule;
 
@@ -75,6 +80,59 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
 
         // then
         assertThat(result).extracting(TicketGradeResponse::grade).containsExactly(Grade.VIP);
+    }
+
+    // ----- 조건부 UPDATE (Task 019) -----
+    // 재고 차감·복원은 엔티티 메서드가 아니라 조건부 UPDATE가 담당하므로, 영향받은 행 수와 실제 DB 값으로 검증한다.
+    // 벌크 UPDATE는 1차 캐시를 갱신하지 않아서 findById로는 바뀐 값을 볼 수 없다 — 스칼라 조회로 읽는다.
+
+    @Test
+    @DisplayName("재고가 충분하면 1행이 차감되고 잔여 수량이 줄어든다")
+    void 조건부_차감_성공() {
+        // given
+        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.VIP, "150000", 10));
+
+        // when
+        int updated = ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 3, Instant.now());
+
+        // then
+        assertThat(updated).isEqualTo(1);
+        assertThat(remainingOf(grade.getId())).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("요청 수량이 잔여 수량과 같으면 0까지 차감된다")
+    void 조건부_차감_경계() {
+        // given
+        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.R, "99000", 4));
+
+        // when
+        int updated = ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 4, Instant.now());
+
+        // then
+        assertThat(updated).isEqualTo(1);
+        assertThat(remainingOf(grade.getId())).isZero();
+    }
+
+    @Test
+    @DisplayName("잔여 수량보다 많이 요청하면 0행이고 잔여 수량은 그대로다")
+    void 조건부_차감_재고부족() {
+        // given
+        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.S, "77000", 2));
+
+        // when
+        int updated = ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 3, Instant.now());
+
+        // then
+        assertThat(updated).isZero();
+        assertThat(remainingOf(grade.getId())).isEqualTo(2);
+    }
+
+
+    private int remainingOf(Long ticketGradeId) {
+        return em.createQuery("select tg.remainingQuantity from TicketGrade tg where tg.id = :id", Integer.class)
+                .setParameter("id", ticketGradeId)
+                .getSingleResult();
     }
 
     private Schedule schedule(Performance performance, int daysFromNow) {
