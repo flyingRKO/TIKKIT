@@ -23,7 +23,11 @@ import com.tikkit.api.domain.reservation.dto.ReservationResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
+import com.tikkit.api.domain.reservation.strategy.NoLockStrategy;
+import com.tikkit.api.domain.reservation.strategy.RetryMetrics;
+import com.tikkit.api.domain.reservation.strategy.SeatHoldStrategyHolder;
 import com.tikkit.api.domain.venue.entity.Venue;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +35,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -42,6 +48,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -71,8 +78,32 @@ class ReservationServiceTest {
     @Mock
     private PaymentGateway paymentGateway;
 
+    @Mock
+    private SeatHoldStrategyHolder seatHoldStrategyHolder;
+
+    @Mock
+    private RetryMetrics retryMetrics;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     @InjectMocks
     private ReservationService reservationService;
+
+    /**
+     * create()가 트랜잭션 템플릿과 전략을 거치도록 최소한만 스텁한다.
+     * <p>
+     * TransactionTemplate을 목으로 두면 execute()가 콜백을 실행하지 않고 null을 반환해서 create()의
+     * 결과가 사라진다. 트랜잭션 경계 자체는 이 유닛 테스트의 관심사가 아니므로(통합 테스트가 다룬다)
+     * 콜백을 그대로 실행시킨다. 결제·취소 테스트는 이 둘을 쓰지 않으므로 lenient로 둔다.
+     */
+    @BeforeEach
+    void stubHoldPath() {
+        lenient().when(transactionTemplate.execute(any()))
+                .thenAnswer(invocation -> invocation.<TransactionCallback<?>>getArgument(0)
+                        .doInTransaction(null));
+        lenient().when(seatHoldStrategyHolder.current()).thenReturn(new NoLockStrategy());
+    }
 
     /** 공연 시작(showAt) 시각을 자유롭게 지정할 수 있는 등급을 만든다. 결제/취소 테스트에서 쓴다. */
     private TicketGrade gradeWithShowAt(Instant showAt, int remainingQuantity) {

@@ -18,18 +18,28 @@ import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
+import com.tikkit.api.domain.reservation.strategy.RetryMetrics;
+import com.tikkit.api.domain.reservation.strategy.SeatHoldStrategyHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 
+/**
+ * 클래스 레벨 {@code @Transactional}을 쓰지 않는다 — {@link #create}가 낙관적 락 충돌을 재시도해야 하고,
+ * 재시도는 트랜잭션이 끝난 뒤에 해야 하기 때문이다(Task 019). 쓰기 메서드마다 직접 붙인다.
+ */
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class ReservationService {
+
+    /** 낙관적 락 충돌 재시도 상한. 이보다 많이 충돌하면 재고가 거의 소진된 상황으로 보고 포기한다. */
+    private static final int MAX_HOLD_ATTEMPTS = 5;
 
     private final ReservationRepository reservationRepository;
     private final TicketGradeRepository ticketGradeRepository;
@@ -37,13 +47,36 @@ public class ReservationService {
     private final ReservationNoGenerator reservationNoGenerator;
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;
+    private final SeatHoldStrategyHolder seatHoldStrategyHolder;
+    private final RetryMetrics retryMetrics;
+    private final TransactionTemplate transactionTemplate;
 
     /**
      * 예매 선점(PENDING 홀드)을 생성한다.
-     * 동시성 미보장 — 재고 차감(TicketGrade.decreaseRemaining)이 단순 읽기-쓰기 방식이라 동시 요청이 몰리면
-     * 초과 판매가 날 수 있다. Phase 5(Task 018~020)에서 조건부 UPDATE로 개선한다.
+     * <p>
+     * 재고 차감 방식은 {@link SeatHoldStrategyHolder}가 들고 있는 전략이 결정한다 (Task 019 비교 실험).
+     * 현재 기본값은 기존 동작(동시성 미보장)이라 초과 판매가 날 수 있다.
+     * <p>
+     * <b>재시도 루프가 트랜잭션 밖에 있는 이유</b>: 낙관적 락 충돌은 커밋 시점에 터지고, 그 트랜잭션은
+     * 이미 rollback-only로 표시된다. 트랜잭션 안에서 예외를 잡아 다시 시도하면 그 표시가 남아 있어
+     * 커밋할 때 {@code UnexpectedRollbackException}이 난다. 그래서 트랜잭션을 완전히 끝낸 뒤
+     * 새 트랜잭션으로 다시 시작해야 한다.
      */
     public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return transactionTemplate.execute(status -> createInNewTransaction(memberId, request));
+            } catch (OptimisticLockingFailureException e) {
+                // 낙관적 락 전략에서만 발생한다. 다른 전략에서는 이 catch에 들어오지 않는다.
+                retryMetrics.increment();
+                if (attempt >= MAX_HOLD_ATTEMPTS) {
+                    throw new BusinessException(ErrorCode.SOLD_OUT);
+                }
+            }
+        }
+    }
+
+    private ReservationResponse createInNewTransaction(Long memberId, ReservationCreateRequest request) {
         TicketGrade ticketGrade = ticketGradeRepository.findById(request.ticketGradeId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
 
@@ -64,7 +97,7 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.DUPLICATE_PENDING_RESERVATION);
         }
 
-        ticketGrade.decreaseRemaining(request.quantity());
+        seatHoldStrategyHolder.current().hold(ticketGrade, request.quantity());
 
         String reservationNo = reservationNoGenerator.generate(now);
         Reservation reservation = Reservation.createPending(
@@ -107,6 +140,7 @@ public class ReservationService {
      * 커넥션을 오래 잡아두는 문제가 없다. 실제 PG(네트워크 I/O)로 바꿀 때는 승인 호출을 트랜잭션 밖으로 빼고,
      * 짧은 트랜잭션으로 상태를 재확인 후 확정하는 구조로 바꿔야 한다 (README "알려진 한계" 참조).
      */
+    @Transactional
     public ReservationResponse pay(Long memberId, Long id, PaymentRequest request) {
         Reservation reservation = reservationRepository.findMineWithDetails(id, memberId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
@@ -132,6 +166,7 @@ public class ReservationService {
      * 예매를 취소한다. PENDING은 시점 제한 없이, CONFIRMED는 공연 24시간 전까지만 가능하다 (docs/PRD.md 참조).
      * CONFIRMED 취소는 결제를 환불 처리하고, 두 상태 모두 취소 시 잔여 수량을 복원한다.
      */
+    @Transactional
     public ReservationResponse cancel(Long memberId, Long id) {
         Reservation reservation = reservationRepository.findMineWithDetails(id, memberId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
