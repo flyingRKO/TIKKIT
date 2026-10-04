@@ -23,9 +23,6 @@ import com.tikkit.api.domain.reservation.dto.ReservationResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
-import com.tikkit.api.domain.reservation.strategy.ConditionalUpdateStrategy;
-import com.tikkit.api.domain.reservation.strategy.RetryMetrics;
-import com.tikkit.api.domain.reservation.strategy.SeatHoldStrategyHolder;
 import com.tikkit.api.domain.venue.entity.Venue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -35,8 +32,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.support.TransactionCallback;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -80,32 +75,15 @@ class ReservationServiceTest {
     @Mock
     private PaymentGateway paymentGateway;
 
-    @Mock
-    private SeatHoldStrategyHolder seatHoldStrategyHolder;
-
-    @Mock
-    private RetryMetrics retryMetrics;
-
-    @Mock
-    private TransactionTemplate transactionTemplate;
-
     @InjectMocks
     private ReservationService reservationService;
 
     /**
-     * 선점 경로가 트랜잭션 템플릿과 전략을 거치도록 최소한만 스텁한다.
-     * <p>
-     * TransactionTemplate을 목으로 두면 execute()가 콜백을 실행하지 않고 null을 반환해서 create()의
-     * 결과가 사라진다. 전략은 채택한 조건부 UPDATE를 그대로 쓰고, 차감이 1행 성공했다고 알려준다 —
-     * 목 기본값 0이면 전부 SOLD_OUT으로 빠진다. 결제·취소 테스트는 이들을 쓰지 않으므로 lenient로 둔다.
+     * 재고 차감이 조건부 UPDATE로 바뀌어서(Task 019) 1행을 차감했다고 알려주지 않으면 SOLD_OUT으로 빠진다.
+     * 목 기본값이 0이라 선점 테스트마다 필요한데, 결제·취소 테스트는 쓰지 않으므로 lenient로 둔다.
      */
     @BeforeEach
-    void stubHoldPath() {
-        lenient().when(transactionTemplate.execute(any()))
-                .thenAnswer(invocation -> invocation.<TransactionCallback<?>>getArgument(0)
-                        .doInTransaction(null));
-        lenient().when(seatHoldStrategyHolder.current())
-                .thenReturn(new ConditionalUpdateStrategy(ticketGradeRepository));
+    void stubStockDecrease() {
         lenient().when(ticketGradeRepository.decreaseRemainingQuantity(any(), anyInt(), any())).thenReturn(1);
     }
 

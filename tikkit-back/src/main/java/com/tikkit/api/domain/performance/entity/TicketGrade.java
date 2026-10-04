@@ -1,8 +1,6 @@
 package com.tikkit.api.domain.performance.entity;
 
 import com.tikkit.api.common.entity.BaseTimeEntity;
-import com.tikkit.api.common.exception.BusinessException;
-import com.tikkit.api.common.exception.ErrorCode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -14,7 +12,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -22,6 +19,15 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 
+/**
+ * 회차별 좌석 등급과 재고.
+ * <p>
+ * <b>재고를 바꾸는 메서드를 일부러 두지 않는다</b> (Task 019). 잔여 수량 변경은
+ * {@code TicketGradeRepository}의 조건부 UPDATE({@code decreaseRemainingQuantity} /
+ * {@code increaseRemainingQuantity})만 담당한다. 엔티티에 수량을 고치는 메서드를 남겨두면
+ * 더티체킹 UPDATE가 조건부 UPDATE를 덮어써서 동시성 제어가 무력화되므로, 그런 경로를 아예 만들지 않았다
+ * (비교 과정: {@code docs/improvements/002-db-lock-comparison.md}).
+ */
 @Getter
 @Entity
 @Table(name = "ticket_grades")
@@ -49,20 +55,6 @@ public class TicketGrade extends BaseTimeEntity {
     @Column(nullable = false)
     private Integer remainingQuantity;
 
-    /**
-     * 낙관적 락 버전 (Task 019 비교 실험용, V3 마이그레이션).
-     * <p>
-     * 이 필드가 붙으면 <b>이 엔티티의 모든 더티체킹 UPDATE에 {@code WHERE version = ?}이 자동으로 붙고
-     * version이 증가한다.</b> 그래서 비교 기준선(동시성 미보장)은 더티체킹을 쓸 수 없고,
-     * 조건 없는 절대값 UPDATE({@code TicketGradeRepository.overwriteRemainingQuantity})로 기존 동작을 재현한다.
-     * <p>
-     * 네이티브·벌크 UPDATE는 이 버전을 올려주지 않는다 — 만료 배치(data-modifying CTE)가 그 경로다.
-     * 즉 낙관적 락은 애플리케이션의 모든 쓰기 경로가 JPA를 거친다는 전제에서만 동작한다.
-     */
-    @Version
-    @Column(nullable = false)
-    private Long version;
-
     @Builder
     private TicketGrade(Schedule schedule, Grade grade, BigDecimal price, Integer totalQuantity,
                          Integer remainingQuantity) {
@@ -73,24 +65,4 @@ public class TicketGrade extends BaseTimeEntity {
         this.remainingQuantity = remainingQuantity;
     }
 
-    /**
-     * 잔여 수량을 차감한다.
-     * 동시성 미보장 — 단순히 읽은 값을 그대로 빼고 더티체킹으로 반영하는 방식이라 동시 요청이 몰리면
-     * lost update(초과 판매)가 발생할 수 있다. Phase 5(Task 018~020)에서 조건부 UPDATE로 개선한다.
-     */
-    public void decreaseRemaining(int quantity) {
-        if (remainingQuantity < quantity) {
-            throw new BusinessException(ErrorCode.SOLD_OUT);
-        }
-        this.remainingQuantity -= quantity;
-    }
-
-    /**
-     * 취소·만료된 예약의 수량만큼 잔여 수량을 복원한다.
-     * 동시성 미보장 — decreaseRemaining과 마찬가지로 더티체킹 방식이라 결제·만료 배치가 겹치면
-     * 이중 복원이 날 수 있다. Phase 5(Task 018~020)에서 개선한다.
-     */
-    public void increaseRemaining(int quantity) {
-        this.remainingQuantity += quantity;
-    }
 }

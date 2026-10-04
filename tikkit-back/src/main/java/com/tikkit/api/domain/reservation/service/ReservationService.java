@@ -18,30 +18,25 @@ import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
-import com.tikkit.api.domain.reservation.strategy.RetryMetrics;
-import com.tikkit.api.domain.reservation.strategy.SeatHoldStrategyHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 
 /**
- * 클래스 레벨 {@code @Transactional}을 쓰지 않는다 — {@link #create}가 낙관적 락 충돌을 재시도해야 하고,
- * 재시도는 트랜잭션이 끝난 뒤에 해야 하기 때문이다(Task 019). 쓰기 메서드마다 직접 붙인다.
+ * 재고와 예약 상태를 바꾸는 모든 경로는 조건부 UPDATE를 쓴다 (Task 019).
+ * 읽은 값을 애플리케이션이 다시 쓰지 않으므로 lost update와 상태 전이 덮어쓰기가 구조적으로 불가능하다.
+ * 그 대신 <b>엔티티 필드를 고치면 안 된다</b> — 더티체킹이 메모리의 낡은 값으로 UPDATE를 또 발행해
+ * 조건부 UPDATE를 무력화한다.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReservationService {
-
-    /** 낙관적 락 충돌 재시도 상한. 이보다 많이 충돌하면 재고가 거의 소진된 상황으로 보고 포기한다. */
-    private static final int MAX_HOLD_ATTEMPTS = 5;
 
     private final ReservationRepository reservationRepository;
     private final TicketGradeRepository ticketGradeRepository;
@@ -49,36 +44,16 @@ public class ReservationService {
     private final ReservationNoGenerator reservationNoGenerator;
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;
-    private final SeatHoldStrategyHolder seatHoldStrategyHolder;
-    private final RetryMetrics retryMetrics;
-    private final TransactionTemplate transactionTemplate;
 
     /**
      * 예매 선점(PENDING 홀드)을 생성한다.
      * <p>
-     * 재고 차감 방식은 {@link SeatHoldStrategyHolder}가 들고 있는 전략이 결정한다 (Task 019 비교 실험).
-     * 현재 기본값은 기존 동작(동시성 미보장)이라 초과 판매가 날 수 있다.
-     * <p>
-     * <b>재시도 루프가 트랜잭션 밖에 있는 이유</b>: 낙관적 락 충돌은 커밋 시점에 터지고, 그 트랜잭션은
-     * 이미 rollback-only로 표시된다. 트랜잭션 안에서 예외를 잡아 다시 시도하면 그 표시가 남아 있어
-     * 커밋할 때 {@code UnexpectedRollbackException}이 난다. 그래서 트랜잭션을 완전히 끝낸 뒤
-     * 새 트랜잭션으로 다시 시작해야 한다.
+     * 재고 차감은 조건부 UPDATE({@code TicketGradeRepository.decreaseRemainingQuantity})가 담당한다.
+     * 읽은 값을 애플리케이션이 다시 쓰지 않으므로 lost update가 구조적으로 불가능하다
+     * (비관적·낙관적 락과의 비교: {@code docs/improvements/002-db-lock-comparison.md}).
      */
+    @Transactional
     public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
-        for (int attempt = 1; ; attempt++) {
-            try {
-                return transactionTemplate.execute(status -> createInNewTransaction(memberId, request));
-            } catch (OptimisticLockingFailureException e) {
-                // 낙관적 락 전략에서만 발생한다. 다른 전략에서는 이 catch에 들어오지 않는다.
-                retryMetrics.increment();
-                if (attempt >= MAX_HOLD_ATTEMPTS) {
-                    throw new BusinessException(ErrorCode.SOLD_OUT);
-                }
-            }
-        }
-    }
-
-    private ReservationResponse createInNewTransaction(Long memberId, ReservationCreateRequest request) {
         TicketGrade ticketGrade = ticketGradeRepository.findById(request.ticketGradeId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
 
@@ -99,7 +74,11 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.DUPLICATE_PENDING_RESERVATION);
         }
 
-        seatHoldStrategyHolder.current().hold(ticketGrade, request.quantity());
+        // 엔티티 필드를 건드리지 않는 것이 중요하다 — 영속 인스턴스가 더티가 되면 flush 시점에
+        // Hibernate가 메모리의 낡은 값으로 UPDATE를 또 발행해 이 조건부 UPDATE를 덮어쓴다.
+        if (ticketGradeRepository.decreaseRemainingQuantity(ticketGrade.getId(), request.quantity(), now) == 0) {
+            throw new BusinessException(ErrorCode.SOLD_OUT);
+        }
 
         String reservationNo = reservationNoGenerator.generate(now);
         Reservation reservation = Reservation.createPending(
