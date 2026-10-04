@@ -21,6 +21,7 @@ import com.tikkit.api.domain.reservation.repository.ReservationRepository;
 import com.tikkit.api.domain.reservation.strategy.RetryMetrics;
 import com.tikkit.api.domain.reservation.strategy.SeatHoldStrategyHolder;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -34,6 +35,7 @@ import java.time.Instant;
  * 클래스 레벨 {@code @Transactional}을 쓰지 않는다 — {@link #create}가 낙관적 락 충돌을 재시도해야 하고,
  * 재시도는 트랜잭션이 끝난 뒤에 해야 하기 때문이다(Task 019). 쓰기 메서드마다 직접 붙인다.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReservationService {
@@ -146,20 +148,50 @@ public class ReservationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
 
         Instant now = Instant.now();
-        boolean alreadyExpired = reservation.getStatus() == ReservationStatus.EXPIRED
-                || (reservation.getStatus() == ReservationStatus.PENDING && reservation.isExpired(now));
-        if (alreadyExpired) {
-            throw new BusinessException(ErrorCode.RESERVATION_EXPIRED);
-        }
-        // 그 외 PENDING이 아닌 상태(CONFIRMED/CANCELLED)는 confirm()이 INVALID_STATUS_TRANSITION으로 막는다
+        reservation.validateConfirmable(now);   // PG를 부르기 전에 메모리 상태로 빠르게 끊는다
 
         String transactionKey =
                 paymentGateway.approve(reservation.getReservationNo(), reservation.getTotalAmount(), request.method());
 
-        reservation.confirm(now);
+        // 승인을 기다린 동안 만료 배치나 취소가 먼저 상태를 바꿨을 수 있다. 메모리의 PENDING을 믿지 않고
+        // DB 상태를 WHERE에 넣어 전이한다. 0행이면 우리가 늦은 것이다.
+        if (reservationRepository.confirmIfPending(id, now) == 0) {
+            compensateApprovedPayment(transactionKey);
+            throw new BusinessException(resolveConfirmConflict(id));
+        }
+
         paymentRepository.save(Payment.paid(reservation, request.method(), transactionKey, now));
 
-        return toResponse(reservation);
+        // 조건부 UPDATE로 바꿨으니 영속 인스턴스의 status/confirmedAt은 낡은 값이다 — 전이 결과를 직접 넘긴다.
+        return toResponse(reservation, ReservationStatus.CONFIRMED, now, null);
+    }
+
+    /**
+     * 승인은 됐지만 확정이 실패한 경우의 보상 환불.
+     * <p>
+     * 환불이 또 실패해도 원래 예외(만료·상태 충돌)를 가려서는 안 되므로 삼켜서 로그만 남긴다.
+     * 이 트랜잭션은 곧 롤백되므로 실패 사실을 DB에 남길 수 없다 — 영속적인 보상(아웃박스 + 정산 배치)은
+     * 범위 밖이다 (README "알려진 한계" 참조).
+     */
+    private void compensateApprovedPayment(String transactionKey) {
+        try {
+            paymentGateway.refund(transactionKey);
+        } catch (RuntimeException e) {
+            log.error("확정 실패 후 보상 환불이 실패했습니다. 수동 정산이 필요합니다. transactionKey={}",
+                    transactionKey, e);
+        }
+    }
+
+    /**
+     * 확정 조건부 UPDATE가 0행일 때 실제 DB 상태로 에러 코드를 결정한다.
+     * EXPIRED(배치가 선수) 또는 PENDING({@code expires_at}이 지남)이면 만료로, 그 외(CONFIRMED/CANCELLED)는
+     * 상태 전이 위반으로 응답한다 — 기존 에러 계약과 같다.
+     */
+    private ErrorCode resolveConfirmConflict(Long id) {
+        ReservationStatus actual = reservationRepository.findStatusById(id).orElse(null);
+        return (actual == ReservationStatus.EXPIRED || actual == ReservationStatus.PENDING)
+                ? ErrorCode.RESERVATION_EXPIRED
+                : ErrorCode.INVALID_STATUS_TRANSITION;
     }
 
     /**
@@ -172,10 +204,20 @@ public class ReservationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
 
         Instant now = Instant.now();
-        boolean isConfirmed = reservation.getStatus() == ReservationStatus.CONFIRMED;
+        ReservationStatus observed = reservation.getStatus();
+        boolean isConfirmed = observed == ReservationStatus.CONFIRMED;
         if (isConfirmed && reservation.isCancelDeadlinePassed(now)) {
             throw new BusinessException(ErrorCode.CANCEL_DEADLINE_PASSED);
         }
+        reservation.validateCancellable();
+
+        // 읽은 상태를 WHERE에 넣은 조건부 전이. 1행을 바꾼 트랜잭션만 아래 환불·재고 복원을 수행한다.
+        // 만료 배치가 먼저 EXPIRED로 바꿨으면 0행이 되어 여기서 끊기므로, 재고 이중 복원이 일어날 수 없다.
+        if (reservationRepository.cancelIfStatus(id, observed, now) == 0) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
+        }
+
+        // 환불을 전이 뒤로 옮겼다 — 전이가 실패했는데 환불부터 하면 돈만 돌려주고 취소는 안 된 상태가 된다.
         if (isConfirmed) {
             Payment payment = paymentRepository.findByReservationId(reservation.getId())
                     .orElseThrow(() -> new IllegalStateException(
@@ -184,11 +226,29 @@ public class ReservationService {
             payment.refund(now);
         }
 
-        // PENDING/CONFIRMED가 아니면 cancel()이 INVALID_STATUS_TRANSITION으로 막는다
-        reservation.cancel(now);
-        reservation.getTicketGrade().increaseRemaining(reservation.getQuantity());
+        int restored = ticketGradeRepository.increaseRemainingQuantity(
+                reservation.getTicketGrade().getId(), reservation.getQuantity(), now);
+        if (restored == 0) {
+            // 상한을 넘기는 복원 = 이미 누군가 복원했다는 뜻. 위 조건부 전이를 통과했으므로 도달할 수 없다.
+            // 조용히 넘기면 재고가 영구히 어긋나므로 롤백시켜 전이까지 되돌린다.
+            throw new IllegalStateException(
+                    "예약(id=%d) 취소 중 재고 복원이 상한을 넘었습니다 — 이중 복원 가능성".formatted(id));
+        }
 
-        return toResponse(reservation);
+        return toResponse(reservation, ReservationStatus.CANCELLED, reservation.getConfirmedAt(), now);
+    }
+
+    /**
+     * 조건부 UPDATE로 상태를 바꾼 뒤의 응답을 만든다.
+     * <p>
+     * 벌크 UPDATE는 1차 캐시를 갱신하지 않으므로 영속 인스턴스의 {@code status}·{@code confirmedAt}·
+     * {@code cancelledAt}은 낡은 값이다. 엔티티에서 읽으면 안 되고 전이 결과를 인자로 받아야 한다.
+     */
+    private ReservationResponse toResponse(Reservation reservation, ReservationStatus status,
+                                           Instant confirmedAt, Instant cancelledAt) {
+        return new ReservationResponse(
+                reservation.getId(), reservation.getReservationNo(), status,
+                reservation.getExpiresAt(), confirmedAt, cancelledAt);
     }
 
     private ReservationResponse toResponse(Reservation reservation) {

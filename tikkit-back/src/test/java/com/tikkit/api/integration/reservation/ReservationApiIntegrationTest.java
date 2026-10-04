@@ -301,9 +301,6 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         // given
         MockHttpSession session = loginAsNewMember("canceller1@tikkit.com");
         Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 2);
-        // 차감은 벌크 UPDATE인데 복원은 아직 엔티티 더티체킹이라, 컨텍스트를 비워 취소 쪽이 DB 값을 읽게 한다.
-        // 상태 전이·복원까지 조건부 UPDATE로 바꾸는 커밋에서 이 줄은 필요 없어진다.
-        clearPersistenceContext();
         int remainingAfterReserve = remainingOf(onSaleGrade.getId());
 
         // when & then
@@ -311,8 +308,6 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
-        // 복원이 아직 엔티티 더티체킹이라 flush 전에는 UPDATE가 나가지 않는다 — JdbcTemplate이 보도록 비운다.
-        clearPersistenceContext();
         assertThat(remainingOf(onSaleGrade.getId()))
                 .isEqualTo(remainingAfterReserve + 2);
     }

@@ -201,8 +201,9 @@ class ReservationRepositoryTest extends AbstractContainerTest {
         Reservation expired1 = reservationRepository.save(pendingReservation(member, 2, pastExpiresAt));
         Reservation expired2 = reservationRepository.save(pendingReservation(other, 3, pastExpiresAt));
         // 실제 선점 흐름(ReservationService.create)처럼 선점 시점에 잔여 수량을 미리 차감해둔다 —
-        // 그래야 배치가 복원했을 때 remaining_quantity <= total_quantity CHECK 제약을 어기지 않는다
-        ticketGrade.decreaseRemaining(2 + 3);
+        // 그래야 배치가 복원했을 때 remaining_quantity <= total_quantity CHECK 제약을 어기지 않는다.
+        // Task 019부터 재고 차감은 조건부 UPDATE가 담당한다.
+        ticketGradeRepository.decreaseRemainingQuantity(ticketGrade.getId(), 2 + 3, now);
         em.flush();
         em.clear();
 

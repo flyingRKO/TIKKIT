@@ -124,25 +124,35 @@ public class Reservation extends BaseTimeEntity {
         return !now.isBefore(schedule.getShowAt().minus(CANCEL_DEADLINE_BEFORE_SHOW));
     }
 
-    /** PENDING -> CONFIRMED 전이. 결제 승인 성공 후 호출한다. */
-    public void confirm(Instant now) {
+    /**
+     * CONFIRMED로 전이할 수 있는 상태인지 검증한다. 결제 게이트웨이를 호출하기 <b>전에</b> 빠르게 끊는 용도다.
+     * <p>
+     * <b>상태를 바꾸지 않는다.</b> 실제 전이는 {@code ReservationRepository.confirmIfPending}의 조건부
+     * UPDATE가 담당한다 (Task 019). 엔티티 필드를 고치면 flush 시점에 Hibernate가 메모리의 낡은 값으로
+     * UPDATE를 또 발행해 그 조건부 UPDATE를 덮어쓰기 때문이다.
+     * <p>
+     * 이 검증은 어디까지나 선검증이다 — PG 승인을 기다리는 동안 만료 배치가 끼어들 수 있으므로,
+     * 최종 판정은 DB의 조건부 UPDATE가 한다.
+     */
+    public void validateConfirmable(Instant now) {
+        if (status == ReservationStatus.EXPIRED
+                || (status == ReservationStatus.PENDING && isExpired(now))) {
+            throw new BusinessException(ErrorCode.RESERVATION_EXPIRED);
+        }
         if (status != ReservationStatus.PENDING) {
             throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
         }
-        this.status = ReservationStatus.CONFIRMED;
-        this.confirmedAt = now;
     }
 
     /**
-     * PENDING/CONFIRMED -> CANCELLED 전이.
+     * CANCELLED로 전이할 수 있는 상태인지 검증한다. {@link #validateConfirmable}와 마찬가지로 상태를 바꾸지 않는다.
+     * <p>
      * 만료 시각이 지난 PENDING도 취소는 허용한다 (docs/PRD.md: PENDING은 시점 제한 없이 취소 가능).
      * 실제 만료 처리는 스케줄러(ReservationExpiryScheduler)가 별도로 수행한다.
      */
-    public void cancel(Instant now) {
+    public void validateCancellable() {
         if (status != ReservationStatus.PENDING && status != ReservationStatus.CONFIRMED) {
             throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
         }
-        this.status = ReservationStatus.CANCELLED;
-        this.cancelledAt = now;
     }
 }

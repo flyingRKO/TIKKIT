@@ -128,6 +128,34 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
         assertThat(remainingOf(grade.getId())).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("복원은 총 수량을 넘지 않을 때만 1행이다")
+    void 조건부_복원() {
+        // given
+        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.A, "55000", 5));
+        ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 2, Instant.now());
+
+        // when
+        int restored = ticketGradeRepository.increaseRemainingQuantity(grade.getId(), 2, Instant.now());
+
+        // then
+        assertThat(restored).isEqualTo(1);
+        assertThat(remainingOf(grade.getId())).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("총 수량을 넘기는 복원은 0행이다 — CHECK 위반(500) 대신 영향 행 수로 드러난다")
+    void 조건부_복원_상한초과() {
+        // given: 차감 없이 가득 찬 상태
+        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.VIP, "150000", 5));
+
+        // when
+        int restored = ticketGradeRepository.increaseRemainingQuantity(grade.getId(), 1, Instant.now());
+
+        // then
+        assertThat(restored).isZero();
+        assertThat(remainingOf(grade.getId())).isEqualTo(5);
+    }
 
     private int remainingOf(Long ticketGradeId) {
         return em.createQuery("select tg.remainingQuantity from TicketGrade tg where tg.id = :id", Integer.class)

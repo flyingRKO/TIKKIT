@@ -9,8 +9,8 @@ import org.springframework.stereotype.Component;
  * "지금 쓰는 방식"이라는 개념이 없다. 비교 테스트가 같은 스프링 컨텍스트에서 네 방식을 번갈아 돌려야 해서
  * 가변 홀더를 둔다.
  * <p>
- * 기본값은 {@link NoLockStrategy} — 이 커밋에서 운영 동작을 바꾸지 않기 위함이다. 조건부 UPDATE를
- * 채택하는 커밋에서 기본값을 바꾼다.
+ * 기본값은 {@link ConditionalUpdateStrategy}다 — 비교 측정 결과 정확성은 세 전략이 같고 소요시간·재시도가
+ * 가장 유리해서 채택했다 (docs/improvements/002-db-lock-comparison.md 참조).
  */
 @Component
 public class SeatHoldStrategyHolder {
@@ -18,7 +18,7 @@ public class SeatHoldStrategyHolder {
     private final SeatHoldStrategy defaultStrategy;
     private volatile SeatHoldStrategy current;
 
-    public SeatHoldStrategyHolder(NoLockStrategy defaultStrategy) {
+    public SeatHoldStrategyHolder(ConditionalUpdateStrategy defaultStrategy) {
         this.defaultStrategy = defaultStrategy;
         this.current = defaultStrategy;
     }
