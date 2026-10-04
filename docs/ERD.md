@@ -38,11 +38,12 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 | venues | id, name varchar(100), address varchar(255) | UNIQUE(name) |
 | performances | id, title varchar(200), category varchar(20) (CONCERT/MUSICAL/THEATER/CLASSIC/SPORTS), description text, poster_url varchar(500), venue_id FK, running_minutes int, age_rating varchar(20), start_date date, end_date date, status varchar(20) (UPCOMING/ON_SALE/CLOSED) | idx(status, start_date) |
 | schedules (회차) | id, performance_id FK, show_at timestamptz, booking_open_at timestamptz, booking_close_at timestamptz | UNIQUE(performance_id, show_at); CHECK(booking_open_at < booking_close_at AND booking_close_at <= show_at) |
-| ticket_grades | id, schedule_id FK, grade varchar(10) (VIP/R/S/A), price numeric(12,0), total_quantity int, remaining_quantity int | UNIQUE(schedule_id, grade); UNIQUE(id, schedule_id) — 복합 FK 타깃; CHECK(0 <= remaining_quantity AND remaining_quantity <= total_quantity), CHECK(price >= 0) |
+| ticket_grades | id, schedule_id FK, grade varchar(10) (VIP/R/S/A), price numeric(12,0), total_quantity int, remaining_quantity int, version bigint | UNIQUE(schedule_id, grade); UNIQUE(id, schedule_id) — 복합 FK 타깃; CHECK(0 <= remaining_quantity AND remaining_quantity <= total_quantity), CHECK(price >= 0) |
 | reservations | id, reservation_no varchar(20), member_id FK, schedule_id FK, ticket_grade_id FK, quantity smallint, unit_price numeric(12,0), total_amount numeric(12,0), status varchar(20) (PENDING/CONFIRMED/CANCELLED/EXPIRED), expires_at timestamptz, confirmed_at timestamptz, cancelled_at timestamptz | UNIQUE(reservation_no); CHECK(quantity BETWEEN 1 AND 4); CHECK(total_amount = unit_price * quantity); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); idx(member_id, created_at DESC); 부분 인덱스 idx(expires_at) WHERE status = 'PENDING' |
 | payments | id, reservation_id FK, amount numeric(12,0), method varchar(20) (CARD/KAKAO_PAY/BANK_TRANSFER), status varchar(20) (PAID/REFUNDED), transaction_key varchar(64), paid_at timestamptz, refunded_at timestamptz | UNIQUE(reservation_id) — 1:1; UNIQUE(transaction_key) |
 
-`ticket_grades`에는 Task 019(낙관적 락)에서 `version bigint` 컬럼이 `V3` 마이그레이션으로 추가된다.
+`ticket_grades.version`은 Task 019의 락 전략 비교 실험을 위해 `V3` 마이그레이션으로 추가한 낙관적 락 버전 컬럼이다.
+비교 결과 조건부 UPDATE를 채택하면 이 컬럼은 쓰이지 않으므로 다시 제거한다.
 
 **한국어 COMMENT (Task 005 `V1__init_schema.sql`에 그대로 포함):**
 
@@ -82,6 +83,7 @@ COMMENT ON COLUMN ticket_grades.grade IS '좌석 등급 (VIP/R/S/A)';
 COMMENT ON COLUMN ticket_grades.price IS '등급별 판매 가격 (원)';
 COMMENT ON COLUMN ticket_grades.total_quantity IS '등급별 총 판매 수량';
 COMMENT ON COLUMN ticket_grades.remaining_quantity IS '잔여 수량. total_quantity에서 활성 예약 수량 합을 뺀 값과 항상 같아야 하며, 동시성 제어(조건부 UPDATE)의 대상이라 인덱스를 걸지 않는다';
+COMMENT ON COLUMN ticket_grades.version IS '낙관적 락 버전 (JPA @Version). Task 019 락 전략 비교 실험용';
 
 COMMENT ON TABLE reservations IS '예매 내역 (좌석 선점부터 결제·취소·만료까지의 상태를 관리)';
 COMMENT ON COLUMN reservations.reservation_no IS '사용자에게 노출되는 예매번호 (TK{yyMMdd}-{6자리}). 날짜는 Asia/Seoul 기준, 뒤 6자리는 reservation_no_seq 시퀀스(V2)로 채번';
@@ -151,6 +153,7 @@ erDiagram
         decimal price
         int total_quantity
         int remaining_quantity
+        bigint version
     }
     RESERVATIONS {
         bigint id PK

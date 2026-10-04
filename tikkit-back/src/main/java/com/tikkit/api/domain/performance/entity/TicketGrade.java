@@ -14,6 +14,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -47,6 +48,20 @@ public class TicketGrade extends BaseTimeEntity {
 
     @Column(nullable = false)
     private Integer remainingQuantity;
+
+    /**
+     * 낙관적 락 버전 (Task 019 비교 실험용, V3 마이그레이션).
+     * <p>
+     * 이 필드가 붙으면 <b>이 엔티티의 모든 더티체킹 UPDATE에 {@code WHERE version = ?}이 자동으로 붙고
+     * version이 증가한다.</b> 그래서 비교 기준선(동시성 미보장)은 더티체킹을 쓸 수 없고,
+     * 조건 없는 절대값 UPDATE({@code TicketGradeRepository.overwriteRemainingQuantity})로 기존 동작을 재현한다.
+     * <p>
+     * 네이티브·벌크 UPDATE는 이 버전을 올려주지 않는다 — 만료 배치(data-modifying CTE)가 그 경로다.
+     * 즉 낙관적 락은 애플리케이션의 모든 쓰기 경로가 JPA를 거친다는 전제에서만 동작한다.
+     */
+    @Version
+    @Column(nullable = false)
+    private Long version;
 
     @Builder
     private TicketGrade(Schedule schedule, Grade grade, BigDecimal price, Integer totalQuantity,

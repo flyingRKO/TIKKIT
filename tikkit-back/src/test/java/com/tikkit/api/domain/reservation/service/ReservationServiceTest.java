@@ -47,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -102,7 +103,7 @@ class ReservationServiceTest {
         lenient().when(transactionTemplate.execute(any()))
                 .thenAnswer(invocation -> invocation.<TransactionCallback<?>>getArgument(0)
                         .doInTransaction(null));
-        lenient().when(seatHoldStrategyHolder.current()).thenReturn(new NoLockStrategy());
+        lenient().when(seatHoldStrategyHolder.current()).thenReturn(new NoLockStrategy(ticketGradeRepository));
     }
 
     /** 공연 시작(showAt) 시각을 자유롭게 지정할 수 있는 등급을 만든다. 결제/취소 테스트에서 쓴다. */
@@ -198,7 +199,9 @@ class ReservationServiceTest {
         assertThat(response.status()).isEqualTo(ReservationStatus.PENDING);
         assertThat(response.reservationNo()).isEqualTo("TK260927-000001");
         assertThat(response.expiresAt()).isNotNull();
-        assertThat(grade.getRemainingQuantity()).isEqualTo(3);
+        // 기준선 전략(NoLockStrategy)은 엔티티를 고치지 않고 리포지토리로 차감한다 (Task 019).
+        // 차감 후 값(5 - 2 = 3)이 그대로 넘어갔는지 확인한다.
+        verify(ticketGradeRepository).overwriteRemainingQuantity(eq(TICKET_GRADE_ID), eq(3), any());
         verify(reservationRepository).save(any());
     }
 
