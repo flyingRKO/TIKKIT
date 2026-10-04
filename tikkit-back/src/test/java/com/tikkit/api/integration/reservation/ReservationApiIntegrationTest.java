@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
@@ -79,6 +80,9 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     private ReservationRepository reservationRepository;
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @PersistenceContext
     private EntityManager em;
@@ -130,8 +134,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .andExpect(jsonPath("$.data.reservationNo").value(matchesPattern("^TK\\d{6}-\\d{6}$")))
                 .andExpect(jsonPath("$.data.expiresAt").isNotEmpty());
 
-        TicketGrade reloaded = ticketGradeRepository.findById(onSaleGrade.getId()).orElseThrow();
-        assertThat(reloaded.getRemainingQuantity()).isEqualTo(1);
+        assertThat(remainingOf(onSaleGrade.getId())).isEqualTo(1);
     }
 
     @Test
@@ -298,14 +301,14 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         // given
         MockHttpSession session = loginAsNewMember("canceller1@tikkit.com");
         Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 2);
-        int remainingAfterReserve = ticketGradeRepository.findById(onSaleGrade.getId()).orElseThrow().getRemainingQuantity();
+        int remainingAfterReserve = remainingOf(onSaleGrade.getId());
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
-        assertThat(ticketGradeRepository.findById(onSaleGrade.getId()).orElseThrow().getRemainingQuantity())
+        assertThat(remainingOf(onSaleGrade.getId()))
                 .isEqualTo(remainingAfterReserve + 2);
     }
 
@@ -320,7 +323,8 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                         .contentType(APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk());
-        int remainingAfterPay = ticketGradeRepository.findById(onSaleGrade.getId()).orElseThrow().getRemainingQuantity();
+        clearPersistenceContext();
+        int remainingAfterPay = remainingOf(onSaleGrade.getId());
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(session))
@@ -329,7 +333,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
 
         assertThat(paymentRepository.findByReservationId(reservationId).orElseThrow().getStatus())
                 .isEqualTo(PaymentStatus.REFUNDED);
-        assertThat(ticketGradeRepository.findById(onSaleGrade.getId()).orElseThrow().getRemainingQuantity())
+        assertThat(remainingOf(onSaleGrade.getId()))
                 .isEqualTo(remainingAfterPay + 1);
     }
 
@@ -354,6 +358,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                         .contentType(APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk());
+        clearPersistenceContext();
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(session))
@@ -410,6 +415,35 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .andExpect(status().isCreated())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).at("/data/id").asLong();
+    }
+
+    /**
+     * 영속성 컨텍스트를 비워 다음 요청이 DB 상태를 새로 읽게 한다.
+     * <p>
+     * 이 테스트는 {@code @Transactional}이라 여러 HTTP 요청이 <b>영속성 컨텍스트 하나</b>를 공유한다.
+     * 상태 전이가 조건부 UPDATE로 바뀐 뒤로는(Task 019) 벌크 UPDATE가 1차 캐시를 갱신하지 않아서,
+     * 결제로 CONFIRMED가 된 예약을 이어서 취소하면 취소 쪽이 낡은 PENDING을 읽고 조건부 전이가 0행이 된다.
+     * 운영에서는 요청마다 컨텍스트가 새로 생기므로 발생하지 않는 테스트 전용 문제다 — 그 조건을 맞춰준다.
+     */
+    private void clearPersistenceContext() {
+        em.flush();
+        em.clear();
+    }
+
+    /**
+     * 잔여 수량을 DB에서 직접 읽는다.
+     * <p>
+     * 재고 차감이 벌크 UPDATE로 바뀐 뒤로는 {@code ticketGradeRepository.findById()}를 쓸 수 없다 (Task 019).
+     * 이 테스트는 {@code @Transactional}이라 서비스와 영속성 컨텍스트를 공유하는데, 벌크 UPDATE는
+     * 1차 캐시를 갱신하지 않으므로 {@code findById}가 {@code @BeforeEach}에서 올려둔 <b>낡은 인스턴스</b>를
+     * 그대로 돌려준다. {@code JdbcTemplate}은 같은 트랜잭션의 커넥션을 쓰므로 미커밋 UPDATE까지 보인다.
+     * <p>
+     * {@code em.clear()}로 해결하지 않은 이유: {@code onSaleGrade}·{@code onSaleSchedule} 필드까지
+     * detach되어 다른 단정이 지연 로딩에서 터진다.
+     */
+    private int remainingOf(Long ticketGradeId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT remaining_quantity FROM ticket_grades WHERE id = ?", Integer.class, ticketGradeId);
     }
 
     private MockHttpSession loginAsNewMember(String email) throws Exception {

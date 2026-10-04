@@ -24,6 +24,7 @@ import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
 import com.tikkit.api.domain.venue.entity.Venue;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,8 +41,11 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -74,6 +78,15 @@ class ReservationServiceTest {
     @InjectMocks
     private ReservationService reservationService;
 
+    /**
+     * 재고 차감이 조건부 UPDATE로 바뀌어서(Task 019) 1행을 차감했다고 알려주지 않으면 SOLD_OUT으로 빠진다.
+     * 목 기본값이 0이라 선점 테스트마다 필요한데, 결제·취소 테스트는 쓰지 않으므로 lenient로 둔다.
+     */
+    @BeforeEach
+    void stubStockDecrease() {
+        lenient().when(ticketGradeRepository.decreaseRemainingQuantity(any(), anyInt(), any())).thenReturn(1);
+    }
+
     /** 공연 시작(showAt) 시각을 자유롭게 지정할 수 있는 등급을 만든다. 결제/취소 테스트에서 쓴다. */
     private TicketGrade gradeWithShowAt(Instant showAt, int remainingQuantity) {
         Venue venue = Venue.builder().name("테스트 공연장").address("서울").build();
@@ -91,13 +104,16 @@ class ReservationServiceTest {
                 .bookingOpenAt(showAt.minus(30, ChronoUnit.DAYS))
                 .bookingCloseAt(showAt.minus(1, ChronoUnit.HOURS))
                 .build();
-        return TicketGrade.builder()
+        TicketGrade grade = TicketGrade.builder()
                 .schedule(schedule)
                 .grade(Grade.VIP)
                 .price(new BigDecimal("150000"))
                 .totalQuantity(10)
                 .remainingQuantity(remainingQuantity)
                 .build();
+        // 재고 복원이 조건부 UPDATE(등급 id로 호출)로 바뀌어서 id가 필요하다 (Task 019)
+        ReflectionTestUtils.setField(grade, "id", TICKET_GRADE_ID);
+        return grade;
     }
 
     /** 결제/취소 테스트용 예약. quantity 2, 단가*수량으로 totalAmount를 맞춘다. */
@@ -167,7 +183,8 @@ class ReservationServiceTest {
         assertThat(response.status()).isEqualTo(ReservationStatus.PENDING);
         assertThat(response.reservationNo()).isEqualTo("TK260927-000001");
         assertThat(response.expiresAt()).isNotNull();
-        assertThat(grade.getRemainingQuantity()).isEqualTo(3);
+        // 재고 차감은 엔티티가 아니라 조건부 UPDATE가 한다 (Task 019) — 요청 수량이 그대로 넘어갔는지 확인한다.
+        verify(ticketGradeRepository).decreaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any());
         verify(reservationRepository).save(any());
     }
 
@@ -261,6 +278,8 @@ class ReservationServiceTest {
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 1);
         ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 2);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        // 재고 부족은 조건부 UPDATE가 0행으로 알려준다 (Task 019) — 메모리 값으로 판단하지 않는다
+        given(ticketGradeRepository.decreaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any())).willReturn(0);
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -279,6 +298,9 @@ class ReservationServiceTest {
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
         given(paymentGateway.approve(reservation.getReservationNo(), reservation.getTotalAmount(), PaymentMethod.CARD))
                 .willReturn("mock-tx-key");
+        // 상태 전이가 조건부 UPDATE로 바뀌어서(Task 019), 1행을 바꿨다고 알려주지 않으면
+        // 서비스가 "전이 실패" 분기로 빠진다. 목 기본값이 0이라 반드시 스텁해야 한다.
+        given(reservationRepository.confirmIfPending(eq(RESERVATION_ID), any())).willReturn(1);
 
         // when
         ReservationResponse response = reservationService.pay(MEMBER_ID, RESERVATION_ID, new PaymentRequest(PaymentMethod.CARD));
@@ -286,6 +308,7 @@ class ReservationServiceTest {
         // then
         assertThat(response.status()).isEqualTo(ReservationStatus.CONFIRMED);
         verify(paymentRepository).save(any(Payment.class));
+        verify(paymentGateway, never()).refund(anyString());   // 전이에 성공했으니 보상 환불은 없다
     }
 
     @Test
@@ -355,13 +378,18 @@ class ReservationServiceTest {
         TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 3);
         Reservation reservation = reservation(ReservationStatus.PENDING, now.minus(1, ChronoUnit.MINUTES), grade); // 만료 시각 지나도 취소는 허용
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
+        // 조건부 전이와 조건부 복원이 각각 1행을 바꿨다고 알려준다 (Task 019)
+        given(reservationRepository.cancelIfStatus(eq(RESERVATION_ID), eq(ReservationStatus.PENDING), any()))
+                .willReturn(1);
+        given(ticketGradeRepository.increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any())).willReturn(1);
 
         // when
         ReservationResponse response = reservationService.cancel(MEMBER_ID, RESERVATION_ID);
 
         // then
         assertThat(response.status()).isEqualTo(ReservationStatus.CANCELLED);
-        assertThat(grade.getRemainingQuantity()).isEqualTo(5); // 3 + quantity(2)
+        // 재고 복원은 엔티티가 아니라 조건부 UPDATE가 한다 — 수량 2가 그대로 넘어갔는지 확인한다
+        verify(ticketGradeRepository).increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any());
         verify(paymentGateway, never()).refund(anyString());
     }
 
@@ -375,6 +403,9 @@ class ReservationServiceTest {
         Payment payment = Payment.paid(reservation, PaymentMethod.CARD, "mock-tx-key", now.minus(1, ChronoUnit.HOURS));
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
         given(paymentRepository.findByReservationId(RESERVATION_ID)).willReturn(Optional.of(payment));
+        given(reservationRepository.cancelIfStatus(eq(RESERVATION_ID), eq(ReservationStatus.CONFIRMED), any()))
+                .willReturn(1);
+        given(ticketGradeRepository.increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any())).willReturn(1);
 
         // when
         ReservationResponse response = reservationService.cancel(MEMBER_ID, RESERVATION_ID);
@@ -382,7 +413,7 @@ class ReservationServiceTest {
         // then
         assertThat(response.status()).isEqualTo(ReservationStatus.CANCELLED);
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
-        assertThat(grade.getRemainingQuantity()).isEqualTo(5);
+        verify(ticketGradeRepository).increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any());
         verify(paymentGateway).refund("mock-tx-key");
     }
 

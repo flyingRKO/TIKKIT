@@ -166,12 +166,17 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `.github/workflows/ci.yml`의 `backend` 잡에 `timeout-minutes: 15` 추가 (동시성 테스트가 멈출 때 러너를 360분 점유하는 것을 막는다)
   - ✅ `docs/improvements/001-overselling-reproduction.md` 작성 (해결안 비교 절은 Task 019에서 채운다)
   - 알려진 한계: 재현이 커넥션 풀 크기에 의존한다 — 풀을 1로 줄이면 완전히 직렬 실행되어 초과 판매가 나지 않는다. 현재 설정(30)에서 4회 모두 100건이 성공했고 단정 임계값은 11건이라 여유가 크지만, CI 러너에서 분포가 달라지면 임계값을 재측정해야 한다. 시나리오 B는 10분을 기다릴 수 없어 `expires_at`을 SQL로 당기고, 스케줄러가 test 프로필에서 꺼져 있어 만료 배치 본체를 직접 호출한다. 취소와 만료가 겹치는 재고 이중 복원(`increaseRemaining`에 상한 검증 없음 → CHECK 위반 가능)은 재현하지 않고 Task 019 대상으로 남긴다
-- **Task 019: [BE] DB 락 전략 적용 및 비교**
-  - 비관적 락 (`@Lock(PESSIMISTIC_WRITE)`) 적용
-  - 낙관적 락 (`V3__add_version_to_ticket_grades.sql` + 재시도 로직) 적용
-  - 조건부 UPDATE(`WHERE remaining_quantity >= :qty`) 적용, 예약 상태 전이도 조건부 UPDATE(`WHERE status = 'PENDING'`)로 강화
-  - 정확성·소요시간·재시도 횟수 비교 후 **조건부 UPDATE 채택**
-  - `docs/improvements/002-db-lock-comparison.md` 작성
+- **Task 019: [BE] DB 락 전략 적용 및 비교** ✅ - 완료
+  - ✅ 네 가지(미보장 기준선 / 비관적 락 / 낙관적 락 / 조건부 UPDATE)를 `SeatHoldStrategy` 인터페이스로 분리해 같은 조건(10석·100스레드·풀 30)에서 측정. 비교가 끝난 추상화는 같은 PR 마지막 커밋에서 제거했다
+  - ✅ 비관적 락: `em.refresh(grade, PESSIMISTIC_WRITE)`로 적용. **`@Lock` 쿼리 메서드를 쓰면 안 되는 함정**이 있다 — 엔티티가 이미 1차 캐시에 있으면 SQL은 `FOR UPDATE`로 나가 락은 잡히지만 Hibernate가 인스턴스 필드를 DB 값으로 덮어쓰지 않아, 락을 걸고도 낡은 값으로 계산해 초과 판매가 난다
+  - ✅ 낙관적 락: `V3__add_version_to_ticket_grades.sql` + `@Version` + **수동 재시도 루프**(트랜잭션 밖). `spring-retry`를 안 쓴 이유는 `@Retryable`을 `@Transactional`과 같은 메서드에 붙이면 트랜잭션 안에서 재시도되는 함정 때문이다. `@Version`은 엔티티 단위로 전역이라 기준선(미보장)까지 낙관적 락이 걸려버려서, 기준선은 조건 없는 절대값 UPDATE로 재현했다
+  - ✅ 조건부 UPDATE 적용 + **예약 상태 전이도 조건부 UPDATE로 강화**(`confirmIfPending`은 `WHERE status='PENDING' AND expires_at > :now`, `cancelIfStatus`는 읽은 상태를 WHERE에). 상태 전이에 성공한 트랜잭션만 재고를 복원하므로 취소↔만료 이중 복원이 구조적으로 사라졌다
+  - ✅ 측정 결과 — 정확성은 세 전략 모두 동일(판매 10매), **조건부 UPDATE 채택**: 총 소요 60~72ms(미보장 287~322 / 비관적 100~121 / 낙관적 120~140), 요청 최대 지연 57~64ms(비관적 90~114 / 낙관적 120~139), 재시도 0회(낙관적은 100요청에 **114~138회**). 결정적 근거는 성능보다 구조였다 — 낙관적 락은 "모든 쓰기가 version을 올려야 한다"는 전역 규약을 요구하고 아무것도 강제하지 않는다(만료 배치의 네이티브 CTE가 실제로 어기고 있었다)
+  - ✅ 결제-만료 경쟁 해결 + **보상 환불**: 확정이 0행이면 이미 떨어진 PG 승인을 환불하고 `RESERVATION_EXPIRED`로 실패시킨다. 새 에러 코드 없이 기존 계약을 유지했다
+  - ✅ Task 018 재현 테스트의 단정을 뒤집어 **회귀 테스트로 전환**(201 10건 / 409 90건 / 불변식 10). 성공·거절 건수까지 단정해 "재고가 남았는데 거절"하는 회귀도 잡는다. 엔티티에서 재고·상태를 바꾸는 메서드를 **삭제**해 더티체킹이 조건부 UPDATE를 덮어쓸 경로를 없앴다
+  - ✅ `V3_1__drop_version_from_ticket_grades.sql`로 `version` 제거. `V4`가 아니라 `V3_1`을 쓴 이유는 ERD 이력에 V4~V8이 미래 계획으로 잡혀 있어 번호가 7곳 밀리기 때문이다 (Flyway는 3.1로 해석해 V3와 V4 사이에 끼운다)
+  - ✅ `docs/improvements/002-db-lock-comparison.md` 작성, `001`의 "해결안 비교" 절 채움, README "알려진 한계" 2개를 해결됨으로 갱신
+  - 알려진 한계: 중복 선점 가드(`existsBy...` + INSERT)는 여전히 동시 요청에 취약하다 — `UNIQUE(member_id, ticket_grade_id) WHERE status='PENDING'` 부분 유니크 인덱스가 정답이지만 마이그레이션 번호를 또 소모해 범위 밖으로 뒀다. 보상 환불은 최선 노력이라 환불 실패 시 로그만 남는다(영속적 보상은 아웃박스+정산 배치가 필요, Phase 7). `DataIntegrityViolationException`은 여전히 500이다(예약번호 시퀀스 한 바퀴, 동시 이중 결제 등 Task 019와 무관한 제약). 측정은 로컬 Docker 기준이라 절대 수치가 아니라 전략 간 상대 비교로 읽어야 한다
 - **Task 020: [BE] Redis 분산 락 비교 실험**
   - docker-compose에 Redis 추가, Redisson `@DistributedLock` AOP 구현
   - "커밋 전 락 해제" 함정과 해결 방법 정리
@@ -274,5 +279,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-03
-**📊 진행 상황**: Phase 4 완료, Phase 5 진행 중 (18/33 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-04
+**📊 진행 상황**: Phase 4 완료, Phase 5 진행 중 (19/33 Tasks 완료)

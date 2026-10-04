@@ -8,7 +8,10 @@ import org.springframework.context.annotation.Primary;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -40,6 +43,7 @@ public class ConcurrencyTestConfig {
     public static class DelayedPaymentGateway implements PaymentGateway {
 
         private final AtomicLong approveDelayMillis = new AtomicLong(0);
+        private final Queue<String> refundedKeys = new ConcurrentLinkedQueue<>();
 
         public void setApproveDelay(Duration delay) {
             approveDelayMillis.set(delay.toMillis());
@@ -47,6 +51,15 @@ public class ConcurrencyTestConfig {
 
         public void resetApproveDelay() {
             approveDelayMillis.set(0);
+        }
+
+        /** 확정 실패 시 보상 환불이 실제로 호출됐는지 확인하려고 기록한다 (Task 019). */
+        public List<String> refundedKeys() {
+            return List.copyOf(refundedKeys);
+        }
+
+        public void resetRefunds() {
+            refundedKeys.clear();
         }
 
         @Override
@@ -57,7 +70,8 @@ public class ConcurrencyTestConfig {
 
         @Override
         public void refund(String transactionKey) {
-            // 환불은 이 테스트의 관심사가 아니라 지연 없이 즉시 성공시킨다.
+            // 환불 자체는 지연 없이 즉시 성공시키고, 호출 사실만 기록한다.
+            refundedKeys.add(transactionKey);
         }
 
         private void sleepQuietly(long millis) {

@@ -42,7 +42,9 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 | reservations | id, reservation_no varchar(20), member_id FK, schedule_id FK, ticket_grade_id FK, quantity smallint, unit_price numeric(12,0), total_amount numeric(12,0), status varchar(20) (PENDING/CONFIRMED/CANCELLED/EXPIRED), expires_at timestamptz, confirmed_at timestamptz, cancelled_at timestamptz | UNIQUE(reservation_no); CHECK(quantity BETWEEN 1 AND 4); CHECK(total_amount = unit_price * quantity); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); idx(member_id, created_at DESC); 부분 인덱스 idx(expires_at) WHERE status = 'PENDING' |
 | payments | id, reservation_id FK, amount numeric(12,0), method varchar(20) (CARD/KAKAO_PAY/BANK_TRANSFER), status varchar(20) (PAID/REFUNDED), transaction_key varchar(64), paid_at timestamptz, refunded_at timestamptz | UNIQUE(reservation_id) — 1:1; UNIQUE(transaction_key) |
 
-`ticket_grades`에는 Task 019(낙관적 락)에서 `version bigint` 컬럼이 `V3` 마이그레이션으로 추가된다.
+`ticket_grades.remaining_quantity`는 조건부 UPDATE(`WHERE remaining_quantity >= :qty`)로만 변경한다.
+Task 019에서 낙관적 락용 `version` 컬럼을 `V3`로 추가해 비교 실험한 뒤 `V3_1`로 제거했다
+(측정 수치와 채택 근거: `docs/improvements/002-db-lock-comparison.md`).
 
 **한국어 COMMENT (Task 005 `V1__init_schema.sql`에 그대로 포함):**
 
@@ -231,7 +233,7 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
    - 회차별로 등급-구역 매핑에 따라 schedule_seats를 생성하고, 등급당 앞쪽 `total_quantity`개 좌석에만 등급을 배정한다.
    - 기존 CONFIRMED/PENDING 예약은 `ROW_NUMBER() OVER (PARTITION BY ticket_grade_id ORDER BY created_at)`로 좌석에 배정하고 상태를 SOLD/HELD로, reservation_seats 행도 생성한다.
    - 검증: 등급별 `SOLD + HELD` 건수가 기존 `total_quantity - remaining_quantity`와 일치해야 한다 (Task 021 마이그레이션 검증 테스트).
-3. **V6 (contract)**: `ticket_grades`의 `total_quantity`/`remaining_quantity`/`version` 컬럼만 제거한다. `reservations` 스키마는 변경하지 않는다(한 예약=한 등급 정책 유지).
+3. **V6 (contract)**: `ticket_grades`의 `total_quantity`/`remaining_quantity` 컬럼만 제거한다. `reservations` 스키마는 변경하지 않는다(한 예약=한 등급 정책 유지).
 
 **선점 쿼리 (다중 행 조건부 UPDATE):**
 
@@ -295,7 +297,8 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V1 | 초기 스키마 (venues, members, performances, schedules, ticket_grades, reservations, payments) | 005 |
 | V1_1 | dev 시드 데이터 (dev 프로필 전용) | 005 |
 | V2 | `reservation_no_seq` 시퀀스 추가 (예약번호 뒤 6자리 채번) | 012 |
-| V3 | `ticket_grades.version` 컬럼 추가 (낙관적 락) | 019 |
+| V3 | `ticket_grades.version` 컬럼 추가 (낙관적 락 비교 실험) | 019 |
+| V3_1 | `ticket_grades.version` 컬럼 제거 (조건부 UPDATE 채택으로 미사용) | 019 |
 | V4 | 지정석 테이블 생성 (seats, schedule_seats, reservation_seats) | 021 |
 | V5 / V5_1 | 기존 데이터 좌석 배정 백필 / 개발용 배치도 시드 | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |

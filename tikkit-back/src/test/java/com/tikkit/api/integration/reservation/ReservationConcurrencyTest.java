@@ -40,15 +40,22 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
- * 예매 선점의 동시성 미보장을 재현하는 테스트 (Task 018).
+ * 예매 선점의 동시성 제어를 검증하는 테스트.
  * <p>
- * <b>이 테스트는 "고쳐진 동작"이 아니라 "현재의 잘못된 동작"을 단정한다.</b> Task 018의 목적은 초과 판매가
- * 실제로 발생한다는 것을 증명하고 수치를 남기는 것이고, 고치는 것은 Task 019(DB 락 전략 비교)의 몫이다.
- * 로드맵은 "테스트가 실패하며 재현"이라고 적었지만 그대로 두면 Task 019까지 CI가 영구 red가 되므로,
- * 현재 동작을 단정해 CI를 초록으로 유지하고 Task 019에서 단정만 뒤집는다 (뒤집을 지점은 주석으로 표시).
+ * Task 018에서 <b>초과 판매와 결제-만료 경쟁을 재현</b>하려고 만들었고(그때는 잘못된 동작을 단정했다),
+ * Task 019에서 조건부 UPDATE를 적용하면서 단정을 뒤집어 <b>이제는 개선이 유지되는지를 지키는
+ * 회귀 테스트</b>가 되었다. 비교 과정과 수치는 {@code docs/improvements/002-db-lock-comparison.md}에 있다.
+ * <p>
+ * 두 시나리오가 막는 것:
+ * <ul>
+ *   <li>재고 차감의 lost update — 재고를 WHERE 절에 넣은 조건부 UPDATE로 막는다</li>
+ *   <li>결제가 만료 처리를 덮어쓰는 경쟁 — 상태를 WHERE 절에 넣은 조건부 UPDATE로 막고,
+ *       이미 받은 PG 승인은 보상 환불한다</li>
+ * </ul>
  *
  * @see com.tikkit.api.domain.reservation.service.ReservationService#create
- * @see TicketGrade#decreaseRemaining(int)
+ * @see com.tikkit.api.domain.performance.repository.TicketGradeRepository#decreaseRemainingQuantity
+ * @see com.tikkit.api.domain.reservation.repository.ReservationRepository#confirmIfPending
  */
 @Import(ConcurrencyTestConfig.class)
 class ReservationConcurrencyTest extends AbstractConcurrencyTest {
@@ -77,12 +84,13 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
     @AfterEach
     void resetPaymentGatewayDelay() {
         delayedPaymentGateway.resetApproveDelay();
+        delayedPaymentGateway.resetRefunds();
     }
 
     @Test
     @Timeout(120)
-    @DisplayName("[재현] 10석에 100명이 동시에 선점하면 재고보다 많이 팔린다 (lost update)")
-    void 초과_판매_재현() throws Exception {
+    @DisplayName("10석에 100명이 동시에 선점하면 정확히 10매만 팔리고 나머지는 거절된다")
+    void 초과_판매_차단() throws Exception {
         // given: 재고 10석 등급 하나와, 서로 다른 회원 100명의 세션
         // 회원을 100명 따로 두는 이유: ReservationService.create()가 (회원, 등급, PENDING) 단위로
         // 중복 선점을 막기 때문에, 같은 회원으로 100번 쏘면 1건만 성공하고 99건이
@@ -129,31 +137,31 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         int remaining = remainingOf(gradeId);
 
         log.info("""
-                [초과 판매 재현] 요청 {}건 / 201 성공 {}건 / 409 SOLD_OUT {}건 / 그 외 {}건
+                [초과 판매 차단] 요청 {}건 / 201 성공 {}건 / 409 SOLD_OUT {}건 / 그 외 {}건
                             판매 수량 합 {} vs 총재고 {} (잔여 {})""",
                 THREAD_COUNT, created.get(), soldOut.get(), unexpected.size(),
                 soldQuantity, TOTAL_QUANTITY, remaining);
 
-        assertThat(unexpected).as("예상 밖 응답·예외가 없어야 재현 결과를 신뢰할 수 있다").isEmpty();
+        assertThat(unexpected).as("예상 밖 응답·예외가 없어야 결과를 신뢰할 수 있다").isEmpty();
         assertThat(created.get() + soldOut.get()).as("모든 요청이 201 또는 409로 끝났다").isEqualTo(THREAD_COUNT);
 
-        // ↓↓↓ Task 019에서 조건부 UPDATE를 적용하면 이 두 줄을 isEqualTo(TOTAL_QUANTITY)로 뒤집는다 ↓↓↓
-        assertThat(soldQuantity).as("팔린 수량이 총재고를 넘었다 = 초과 판매").isGreaterThan(TOTAL_QUANTITY);
-        assertThat(soldQuantity + remaining).as("재고 불변식(판매 + 잔여 = 총재고)이 깨졌다")
-                .isGreaterThan(TOTAL_QUANTITY);
-        // ↑↑↑ 여기까지 ↑↑↑
+        // 재고만큼만 팔리고 나머지는 전부 거절된다.
+        // "판매 수량 합"만 보면 "10건 성공 + 90건 거절"과 "5건 성공 + 95건 거절"을 구분할 수 없으므로,
+        // 성공·거절 건수까지 단정해서 "재고가 남았는데 거절"하는 회귀도 잡는다.
+        assertThat(created.get()).as("재고만큼만 선점에 성공했다").isEqualTo(TOTAL_QUANTITY);
+        assertThat(soldOut.get()).as("나머지는 모두 SOLD_OUT으로 거절됐다")
+                .isEqualTo(THREAD_COUNT - TOTAL_QUANTITY);
 
-        // CHECK 제약은 끝까지 살아있다 — 즉 DB 제약으로는 초과 판매를 막을 수 없다.
-        // 각 트랜잭션이 쓰는 값은 "자기가 읽은 값 - 1"이라 항상 [0, total] 범위 안이고,
-        // 재고가 모자라면 그 전에 SOLD_OUT으로 끊기기 때문이다 (V1__init_schema.sql:64).
-        assertThat(remaining).as("ck_ticket_grades_remaining_range를 위반하지 않았다")
-                .isBetween(0, TOTAL_QUANTITY);
+        assertThat(soldQuantity).as("팔린 수량이 총재고와 같다 = 초과 판매 없음").isEqualTo(TOTAL_QUANTITY);
+        assertThat(soldQuantity + remaining).as("재고 불변식(판매 + 잔여 = 총재고)이 지켜졌다")
+                .isEqualTo(TOTAL_QUANTITY);
+        assertThat(remaining).as("재고가 정확히 소진됐다").isZero();
     }
 
     @Test
     @Timeout(120)
-    @DisplayName("[재현] PG 승인이 지연되는 동안 만료 배치가 끼어들면 결제는 확정되는데 재고가 복원된다")
-    void 결제_만료_배치_경쟁_재현() throws Exception {
+    @DisplayName("PG 승인이 지연되는 동안 만료 배치가 끼어들면 결제가 거절되고 승인은 보상 환불된다")
+    void 결제_만료_배치_경쟁_차단() throws Exception {
         // 워밍업: MockMvc·JPA 첫 호출은 느려서(쿼리 플랜·JIT) 결제 스레드가 만료 시각 전에 예약 조회까지
         // 도달하지 못할 수 있다. 다른 등급으로 선점+결제를 한 번 돌려 경로를 데워둔다.
         warmUpReserveAndPay();
@@ -201,22 +209,22 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         int soldQuantity = soldQuantityOf(gradeId);
 
         log.info("""
-                [결제-만료 경쟁 재현] 만료 배치가 복원한 등급 {}건 / 결제 응답 {}
+                [결제-만료 경쟁 차단] 만료 배치가 복원한 등급 {}건 / 결제 응답 {}
                             예약 상태 {} / 결제 상태 {} / 잔여 {} vs 총재고 {} (활성 판매 수량 {})""",
                 expiredGrades, payStatus, status, paymentStatusOf(reservationId),
                 remaining, TOTAL_QUANTITY, soldQuantity);
 
         assertThat(expiredGrades).as("만료 배치가 이 등급의 재고를 복원했다").isEqualTo(1);
-        assertThat(payStatus).as("결제는 성공으로 끝났다").isEqualTo(200);
 
-        // ↓↓↓ Task 019에서 상태 전이를 조건부 UPDATE(WHERE status='PENDING')로 바꾸면 뒤집을 단정 ↓↓↓
-        // 결제 트랜잭션의 confirm()이 WHERE id만 걸고 UPDATE해서 배치가 쓴 EXPIRED를 덮어썼다.
-        assertThat(status).as("만료 처리를 결제가 덮어썼다").isEqualTo("CONFIRMED");
-        assertThat(paymentStatusOf(reservationId)).as("결제는 승인됐다").isEqualTo("PAID");
-        assertThat(remaining).as("팔린 좌석인데 재고가 복원됐다").isEqualTo(TOTAL_QUANTITY);
-        assertThat(soldQuantity + remaining).as("재고 불변식(판매 + 잔여 = 총재고)이 깨졌다")
-                .isGreaterThan(TOTAL_QUANTITY);
-        // ↑↑↑ 여기까지 ↑↑↑
+        // 상태 전이가 조건부 UPDATE(WHERE status = 'PENDING')로 바뀌어서, 만료 배치가 먼저 EXPIRED로
+        // 바꾼 뒤에 들어온 확정은 0행이 되어 실패한다. 그 전에 받은 PG 승인은 보상 환불로 되돌린다.
+        assertThat(payStatus).as("결제가 만료로 거절됐다").isEqualTo(409);
+        assertThat(status).as("만료 처리가 덮어쓰이지 않았다").isEqualTo("EXPIRED");
+        assertThat(paymentStatusOf(reservationId)).as("예외로 롤백되어 결제 행이 남지 않았다").isEqualTo("결제 없음");
+        assertThat(delayedPaymentGateway.refundedKeys()).as("승인됐던 결제가 보상 환불됐다").hasSize(1);
+        assertThat(remaining).as("만료로 재고가 정상 복원됐다").isEqualTo(TOTAL_QUANTITY);
+        assertThat(soldQuantity + remaining).as("재고 불변식(판매 + 잔여 = 총재고)이 지켜졌다")
+                .isEqualTo(TOTAL_QUANTITY);
     }
 
     /** 다른 등급에서 선점+결제를 한 번 수행해 MockMvc·JPA 경로를 데운다 (지연 없이). */

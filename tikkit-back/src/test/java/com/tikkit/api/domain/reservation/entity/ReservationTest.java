@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ReservationTest {
@@ -54,62 +55,72 @@ class ReservationTest {
         assertThat(reservation.isExpired(Instant.now())).isFalse();
     }
 
+    // Task 019부터 상태 전이는 엔티티가 아니라 조건부 UPDATE(ReservationRepository)가 수행한다.
+    // 엔티티에는 "전이 가능한 상태인가"를 판단하는 검증만 남아 있어서, 아래 테스트들도 검증 결과만 확인한다.
+
     @Test
-    @DisplayName("PENDING 예약을 확정하면 CONFIRMED로 바뀌고 confirmedAt이 채워진다")
-    void 결제_확정_성공() {
+    @DisplayName("선점 시간이 남은 PENDING 예약은 확정 가능 검증을 통과한다")
+    void 확정_가능_검증_통과() {
         // given
         Reservation reservation = reservation(ReservationStatus.PENDING, Instant.now().plus(5, ChronoUnit.MINUTES),
                 Instant.now().plus(30, ChronoUnit.DAYS));
-        Instant now = Instant.now();
 
-        // when
-        reservation.confirm(now);
-
-        // then
-        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
-        assertThat(reservation.getConfirmedAt()).isEqualTo(now);
+        // when & then
+        assertThatNoException().isThrownBy(() -> reservation.validateConfirmable(Instant.now()));
     }
 
     @Test
     @DisplayName("PENDING이 아닌 예약은 확정할 수 없다")
-    void 결제_확정_실패_잘못된_상태() {
+    void 확정_검증_실패_잘못된_상태() {
         // given
         Reservation reservation = reservation(ReservationStatus.CONFIRMED, Instant.now(), Instant.now().plus(30, ChronoUnit.DAYS));
 
         // when & then
-        assertThatThrownBy(() -> reservation.confirm(Instant.now()))
+        assertThatThrownBy(() -> reservation.validateConfirmable(Instant.now()))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_STATUS_TRANSITION);
     }
 
     @Test
-    @DisplayName("만료 시각이 지난 PENDING 예약도 취소할 수 있다")
+    @DisplayName("선점 시간이 지난 PENDING과 이미 EXPIRED인 예약은 RESERVATION_EXPIRED로 막는다")
+    void 확정_검증_실패_만료() {
+        // given
+        Instant now = Instant.now();
+        Reservation expiredHold = reservation(ReservationStatus.PENDING, now.minus(1, ChronoUnit.MINUTES),
+                now.plus(30, ChronoUnit.DAYS));
+        Reservation alreadyExpired = reservation(ReservationStatus.EXPIRED, now.minus(1, ChronoUnit.MINUTES),
+                now.plus(30, ChronoUnit.DAYS));
+
+        // when & then
+        assertThatThrownBy(() -> expiredHold.validateConfirmable(now))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.RESERVATION_EXPIRED);
+        assertThatThrownBy(() -> alreadyExpired.validateConfirmable(now))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.RESERVATION_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("만료 시각이 지난 PENDING 예약도 취소 가능 검증을 통과한다")
     void 만료된_PENDING_취소_허용() {
         // given
         Instant now = Instant.now();
         Reservation reservation = reservation(ReservationStatus.PENDING, now.minus(1, ChronoUnit.MINUTES),
                 now.plus(30, ChronoUnit.DAYS));
 
-        // when
-        reservation.cancel(now);
-
-        // then
-        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
-        assertThat(reservation.getCancelledAt()).isEqualTo(now);
+        // when & then
+        assertThatNoException().isThrownBy(reservation::validateCancellable);
     }
 
     @Test
-    @DisplayName("CONFIRMED 예약도 취소할 수 있다")
+    @DisplayName("CONFIRMED 예약도 취소 가능 검증을 통과한다")
     void CONFIRMED_취소_허용() {
         // given
         Instant now = Instant.now();
         Reservation reservation = reservation(ReservationStatus.CONFIRMED, now, now.plus(30, ChronoUnit.DAYS));
 
-        // when
-        reservation.cancel(now);
-
-        // then
-        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        // when & then
+        assertThatNoException().isThrownBy(reservation::validateCancellable);
     }
 
     @Test
@@ -120,10 +131,10 @@ class ReservationTest {
         Reservation expired = reservation(ReservationStatus.EXPIRED, Instant.now(), Instant.now().plus(30, ChronoUnit.DAYS));
 
         // when & then
-        assertThatThrownBy(() -> cancelled.cancel(Instant.now()))
+        assertThatThrownBy(cancelled::validateCancellable)
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_STATUS_TRANSITION);
-        assertThatThrownBy(() -> expired.cancel(Instant.now()))
+        assertThatThrownBy(expired::validateCancellable)
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_STATUS_TRANSITION);
     }
