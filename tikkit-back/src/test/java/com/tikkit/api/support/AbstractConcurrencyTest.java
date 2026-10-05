@@ -159,6 +159,32 @@ public abstract class AbstractConcurrencyTest extends AbstractContainerTest {
     }
 
     /**
+     * 회원 <b>한 명</b>을 만들고, 그 회원의 독립된 로그인 세션 {@code count}개를 돌려준다.
+     * <p>
+     * {@code (회원, 등급, PENDING)} 중복 선점 가드를 겨누는 테스트용이다. 같은 회원이어야 가드가
+     * 발동하므로 회원은 하나만 만들고, 세션은 스레드마다 따로 준다 — {@code MockHttpSession}의 속성
+     * 맵이 {@code LinkedHashMap}이라 스레드 안전하지 않고, 스프링 시큐리티가 요청 처리 중에
+     * 세션에 {@code SecurityContext}를 다시 써넣을 수 있다. 세션 하나를 여러 스레드가 공유하면
+     * 검증 대상과 무관한 하네스 레벨 경쟁이 섞인다.
+     */
+    protected List<MockHttpSession> createOneMemberWithSessions(int count) {
+        int seq = fixtureSequence.getAndIncrement();
+        Member member = memberRepository.save(Member.builder()
+                .email("concurrency-dup-%d@tikkit.test".formatted(seq))
+                .password(passwordEncoder.encode(RAW_PASSWORD))
+                .name("중복선점테스터")
+                .phone("010-0000-0000")
+                .role(MemberRole.USER)
+                .build());
+
+        List<MockHttpSession> sessions = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            sessions.add(sessionFor(member));
+        }
+        return sessions;
+    }
+
+    /**
      * 로그인 API를 타지 않고 세션에 SecurityContext를 직접 심는다.
      * <p>
      * {@code /auth/signup} + {@code /auth/login}을 100번 호출하면 BCrypt 해싱·검증이 200번 돌아

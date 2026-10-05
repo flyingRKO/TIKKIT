@@ -39,7 +39,7 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 | performances | id, title varchar(200), category varchar(20) (CONCERT/MUSICAL/THEATER/CLASSIC/SPORTS), description text, poster_url varchar(500), venue_id FK, running_minutes int, age_rating varchar(20), start_date date, end_date date, status varchar(20) (UPCOMING/ON_SALE/CLOSED) | idx(status, start_date) |
 | schedules (회차) | id, performance_id FK, show_at timestamptz, booking_open_at timestamptz, booking_close_at timestamptz | UNIQUE(performance_id, show_at); CHECK(booking_open_at < booking_close_at AND booking_close_at <= show_at) |
 | ticket_grades | id, schedule_id FK, grade varchar(10) (VIP/R/S/A), price numeric(12,0), total_quantity int, remaining_quantity int | UNIQUE(schedule_id, grade); UNIQUE(id, schedule_id) — 복합 FK 타깃; CHECK(0 <= remaining_quantity AND remaining_quantity <= total_quantity), CHECK(price >= 0) |
-| reservations | id, reservation_no varchar(20), member_id FK, schedule_id FK, ticket_grade_id FK, quantity smallint, unit_price numeric(12,0), total_amount numeric(12,0), status varchar(20) (PENDING/CONFIRMED/CANCELLED/EXPIRED), expires_at timestamptz, confirmed_at timestamptz, cancelled_at timestamptz | UNIQUE(reservation_no); CHECK(quantity BETWEEN 1 AND 4); CHECK(total_amount = unit_price * quantity); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); idx(member_id, created_at DESC); 부분 인덱스 idx(expires_at) WHERE status = 'PENDING' |
+| reservations | id, reservation_no varchar(20), member_id FK, schedule_id FK, ticket_grade_id FK, quantity smallint, unit_price numeric(12,0), total_amount numeric(12,0), status varchar(20) (PENDING/CONFIRMED/CANCELLED/EXPIRED), expires_at timestamptz, confirmed_at timestamptz, cancelled_at timestamptz | UNIQUE(reservation_no); CHECK(quantity BETWEEN 1 AND 4); CHECK(total_amount = unit_price * quantity); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); idx(member_id, created_at DESC); 부분 인덱스 idx(expires_at) WHERE status = 'PENDING'; 부분 유니크 인덱스 uk(member_id, ticket_grade_id) WHERE status = 'PENDING' — 같은 회원의 같은 등급 중복 선점 방지 (V3_2, Task 020) |
 | payments | id, reservation_id FK, amount numeric(12,0), method varchar(20) (CARD/KAKAO_PAY/BANK_TRANSFER), status varchar(20) (PAID/REFUNDED), transaction_key varchar(64), paid_at timestamptz, refunded_at timestamptz | UNIQUE(reservation_id) — 1:1; UNIQUE(transaction_key) |
 
 `ticket_grades.remaining_quantity`는 조건부 UPDATE(`WHERE remaining_quantity >= :qty`)로만 변경한다.
@@ -299,6 +299,7 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V2 | `reservation_no_seq` 시퀀스 추가 (예약번호 뒤 6자리 채번) | 012 |
 | V3 | `ticket_grades.version` 컬럼 추가 (낙관적 락 비교 실험) | 019 |
 | V3_1 | `ticket_grades.version` 컬럼 제거 (조건부 UPDATE 채택으로 미사용) | 019 |
+| V3_2 | 중복 선점 방지 부분 유니크 인덱스 추가 (reservations) | 020 |
 | V4 | 지정석 테이블 생성 (seats, schedule_seats, reservation_seats) | 021 |
 | V5 / V5_1 | 기존 데이터 좌석 배정 백필 / 개발용 배치도 시드 | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |

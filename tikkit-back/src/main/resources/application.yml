@@ -16,3 +16,10 @@ server:
       cookie:
         http-only: true
         same-site: lax
+
+# Redis (Task 020에서 도입). 기본값을 false로 둬서 Redis 없이도 기동·테스트가 된다.
+# 쓰려면 docker-compose로 redis를 띄우고 REDIS_ENABLED=true로 실행한다.
+tikkit:
+  redis:
+    enabled: ${REDIS_ENABLED:false}
+    address: ${REDIS_ADDRESS:redis://localhost:6379}

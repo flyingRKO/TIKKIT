@@ -35,6 +35,7 @@
 | 프론트엔드 | Next.js 16.2.3 (App Router), React 19.2.4, TypeScript 5, TailwindCSS v4 |
 | 백엔드 | Spring Boot 3.4.5, Java 21, Spring Data JPA + QueryDSL + MyBatis |
 | 데이터베이스 | PostgreSQL 15 (Docker), Flyway |
+| 캐시·대기열 | Redis 7 + Redisson (Task 020 도입, `REDIS_ENABLED=true`일 때만 사용) |
 | 테스트·CI | JUnit 5 + Testcontainers (BE), Playwright (E2E), GitHub Actions |
 
 ## 아키텍처
@@ -80,11 +81,15 @@ TIKKIT/
 ```bash
 cd tikkit-back
 cp .env.example .env   # 최초 1회
-docker-compose up -d   # PostgreSQL 실행 (Docker Desktop 필요)
+docker-compose up -d   # PostgreSQL + Redis 실행 (Docker Desktop 필요)
 ./gradlew bootRun       # http://localhost:8080
 ```
 
-기동 시 Flyway가 V1 스키마와 dev 시드 데이터를 자동 적용합니다. 테스트 계정(비밀번호 모두 `Password1!`):
+기동 시 Flyway가 스키마와 dev 시드 데이터를 자동 적용합니다. Redis는 띄워만 두고 애플리케이션은
+쓰지 않습니다 — 캐시·대기열이 들어오는 Task 029·031까지는 `REDIS_ENABLED=true`로 실행할 때만
+연결합니다(Redis가 없어도 기동됩니다. 이유는 [003](docs/improvements/003-redis-distributed-lock.md) 3절).
+
+테스트 계정(비밀번호 모두 `Password1!`):
 
 | 이메일 | 권한 |
 |---|---|
@@ -142,9 +147,38 @@ MVP는 이 한계를 의도적으로 남긴 채 출시했고, Phase 5에서 재�
 |---|---|---|
 | Task 018 | 10석에 100명 동시 요청 → **100건 전원 성공**(판매 100 vs 재고 10) 재현 | [001](docs/improvements/001-overselling-reproduction.md) |
 | Task 019 | 비관적 락 / 낙관적 락 / 조건부 UPDATE 비교 후 **조건부 UPDATE 채택** → 판매 정확히 **10매** | [002](docs/improvements/002-db-lock-comparison.md) |
+| Task 020 | Redis 분산 락과 비교 → **정확성 동일, 분산 락이 6~7배 느림**. "단일 DB에서는 불필요" 결론 | [003](docs/improvements/003-redis-distributed-lock.md) |
 
 회귀는 `ReservationConcurrencyTest`(100스레드 vs 10석)가 지킵니다.
 
+
+## 동시성 제어: 중복 선점 차단 (해결됨)
+
+같은 회원이 같은 등급에 선점을 둘 이상 갖지 못하게 막는 가드는 "조회 후 INSERT"였습니다. 두 문장
+사이가 벌어져 있어 조건부 UPDATE로 묶을 수 없고, 20스레드 동시 요청에서 **20건 전원이 통과**했습니다.
+재고 차감이 조건부 UPDATE로 직렬화되는데도 그랬습니다 — 가드 통과 여부가 락을 잡기 전에 이미
+결정되기 때문입니다.
+
+최종 방어선은 DB 제약으로 내렸습니다.
+
+```sql
+CREATE UNIQUE INDEX uk_reservations_pending_member_grade
+    ON reservations (member_id, ticket_grade_id)
+    WHERE status = 'PENDING';
+```
+
+| 단계 | 내용 | 기록 |
+|---|---|---|
+| Task 020 | 20스레드 동시 요청 → **PENDING 20건** 재현 → Redis 분산 락과 부분 유니크 인덱스 비교 → **인덱스 채택**, PENDING 정확히 **1건** | [003](docs/improvements/003-redis-distributed-lock.md) |
+
+Redis 분산 락도 막아주지만, "모든 쓰기 경로가 같은 키로 락을 잡아야 한다"는 전역 규약을 요구하고
+아무것도 강제하지 않습니다. DB 제약은 어느 경로로 들어와도 성립합니다. 애플리케이션의 조회 가드는
+재고를 깎고 롤백하는 낭비를 줄이는 빠른 경로로 남겨뒀습니다.
+
+회귀는 `ReservationConcurrencyTest`(20스레드 vs 같은 회원)가 지킵니다.
+
+남은 한계: 인덱스는 `PENDING`만 제한합니다. 같은 회원이 같은 등급에 `CONFIRMED` 예약을 여러 건 갖는
+것은 의도된 동작입니다(나눠 결제).
 ## 동시성 제어: 결제-만료 배치 경쟁 차단 (해결됨)
 
 결제 승인과 선점 만료 배치(60초 주기)가 같은 예약을 동시에 건드리는 경쟁도 조건부 UPDATE로 막았습니다.

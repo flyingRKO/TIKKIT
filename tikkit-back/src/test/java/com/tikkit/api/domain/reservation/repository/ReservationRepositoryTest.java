@@ -295,6 +295,46 @@ class ReservationRepositoryTest extends AbstractContainerTest {
         assertThat(asOther).isEmpty();
     }
 
+
+    @Test
+    @DisplayName("같은 회원이 같은 등급에 PENDING 예약을 둘 만들면 부분 유니크 인덱스를 위반한다")
+    void 중복_선점_부분_유니크_인덱스() {
+        Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+        reservationRepository.saveAndFlush(pendingReservation(member, 1, expiresAt));
+
+        assertThatThrownBy(() -> reservationRepository.saveAndFlush(pendingReservation(member, 1, expiresAt)))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .satisfies(e -> {
+                    // 서비스가 이 이름으로 다른 제약 위반과 구분해 409로 바꾼다 (ReservationService.create).
+                    // 제약명이 실제로 어떻게 담기는지는 DB·드라이버·Hibernate에 달려 있어서 여기서 못 박아 둔다.
+                    String name = constraintNameOf(e);
+                    assertThat(name).as("제약명을 꺼낼 수 있다. 실제 값: %s", name)
+                            .isEqualTo("uk_reservations_pending_member_grade");
+                });
+    }
+
+    @Test
+    @DisplayName("부분 유니크 인덱스는 PENDING만 제한하므로 앞 예약이 CANCELLED면 다시 선점할 수 있다")
+    void 중복_선점_부분_조건() {
+        Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+        Reservation first = reservationRepository.saveAndFlush(pendingReservation(member, 1, expiresAt));
+        reservationRepository.cancelIfStatus(first.getId(), ReservationStatus.PENDING, Instant.now());
+        em.clear();
+
+        Reservation second = reservationRepository.saveAndFlush(pendingReservation(member, 1, expiresAt));
+
+        assertThat(second.getId()).as("CANCELLED는 인덱스 조건 밖이라 새 PENDING을 만들 수 있다").isNotNull();
+    }
+
+    /** DataIntegrityViolationException 원인 체인에서 Hibernate가 채운 제약명을 꺼낸다. */
+    private String constraintNameOf(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof org.hibernate.exception.ConstraintViolationException violation) {
+                return violation.getConstraintName();
+            }
+        }
+        return null;
+    }
     private Reservation pendingReservation(Member owner, int quantity, Instant expiresAt) {
         return Reservation.builder()
                 .reservationNo("TK" + UUID.randomUUID().toString().substring(0, 8))
