@@ -2,6 +2,8 @@ package com.tikkit.api.domain.reservation.service;
 
 import com.tikkit.api.common.exception.BusinessException;
 import com.tikkit.api.common.exception.ErrorCode;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import com.tikkit.api.domain.member.repository.MemberRepository;
 import com.tikkit.api.domain.payment.entity.Payment;
 import com.tikkit.api.domain.payment.gateway.PaymentGateway;
@@ -37,6 +39,9 @@ import java.time.Instant;
 @Service
 @RequiredArgsConstructor
 public class ReservationService {
+
+    /** V3_2의 부분 유니크 인덱스 이름. 중복 선점 위반만 골라내는 데 쓴다. */
+    private static final String UK_PENDING_HOLD = "uk_reservations_pending_member_grade";
 
     private final ReservationRepository reservationRepository;
     private final TicketGradeRepository ticketGradeRepository;
@@ -83,9 +88,38 @@ public class ReservationService {
         String reservationNo = reservationNoGenerator.generate(now);
         Reservation reservation = Reservation.createPending(
                 reservationNo, memberRepository.getReferenceById(memberId), ticketGrade, request.quantity(), now);
-        reservationRepository.save(reservation);
+
+        // 위 existsBy 가드는 check-then-insert라 동시 요청에 뚫린다. 최종 방어선은 V3_2의
+        // 부분 유니크 인덱스이고, 그 위반만 골라 같은 409로 바꾼다 (Task 020).
+        // Reservation의 PK가 IDENTITY라 save() 시점에 INSERT가 나가므로 여기서 잡을 수 있다 —
+        // SEQUENCE였다면 커밋 시점에 터져서 서비스에서 못 잡고 500으로 떨어진다.
+        try {
+            reservationRepository.save(reservation);
+        } catch (DataIntegrityViolationException e) {
+            if (isDuplicatePendingHold(e)) {
+                throw new BusinessException(ErrorCode.DUPLICATE_PENDING_RESERVATION);
+            }
+            throw e;
+        }
 
         return toResponse(reservation);
+    }
+
+    /**
+     * 중복 선점 부분 유니크 인덱스 위반인지 제약명으로 가린다.
+     * <p>
+     * {@code GlobalExceptionHandler}에서 처리하지 않는 이유: 거기서는 어떤 제약인지 알 수 없어
+     * {@code uk_reservations_reservation_no}(예약번호 시퀀스 한 바퀴)나
+     * {@code uk_payments_reservation_id}(동시 이중 결제)까지 모두 409로 뭉개게 된다. 그쪽은 의미가
+     * 다른 별개 과제로 남아 있다.
+     */
+    private boolean isDuplicatePendingHold(DataIntegrityViolationException e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation) {
+                return UK_PENDING_HOLD.equals(violation.getConstraintName());
+            }
+        }
+        return false;
     }
 
     /** 내 예매 목록을 상태(선택)로 필터링해 최신순으로 조회한다. */

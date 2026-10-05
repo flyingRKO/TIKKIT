@@ -4,6 +4,10 @@ import com.tikkit.api.common.exception.BusinessException;
 import com.tikkit.api.common.exception.ErrorCode;
 import com.tikkit.api.domain.member.entity.Member;
 import com.tikkit.api.domain.member.entity.MemberRole;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
+
+import java.sql.SQLException;
 import com.tikkit.api.domain.member.repository.MemberRepository;
 import com.tikkit.api.domain.payment.entity.Payment;
 import com.tikkit.api.domain.payment.entity.PaymentMethod;
@@ -130,6 +134,55 @@ class ReservationServiceTest {
                 .build();
         ReflectionTestUtils.setField(r, "id", RESERVATION_ID);
         return r;
+    }
+
+
+    @Test
+    @DisplayName("부분 유니크 인덱스 위반으로 저장이 실패하면 DUPLICATE_PENDING_RESERVATION으로 바꾼다")
+    void 저장시_중복_선점_인덱스_위반() {
+        // given: existsBy 가드는 통과했지만(동시 요청) INSERT에서 인덱스에 걸린 상황
+        Instant now = Instant.now();
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
+        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
+        given(reservationNoGenerator.generate(any())).willReturn("TK260927-000002");
+        given(reservationRepository.save(any()))
+                .willThrow(violation("uk_reservations_pending_member_grade"));
+
+        // when & then
+        assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.DUPLICATE_PENDING_RESERVATION);
+    }
+
+    @Test
+    @DisplayName("다른 제약 위반은 409로 바꾸지 않고 그대로 올려보낸다")
+    void 저장시_다른_제약_위반은_전파() {
+        // 예약번호 시퀀스 한 바퀴(uk_reservations_reservation_no) 같은 건 의미가 달라서 뭉개면 안 된다.
+        Instant now = Instant.now();
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
+        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
+        given(reservationNoGenerator.generate(any())).willReturn("TK260927-000003");
+        given(reservationRepository.save(any()))
+                .willThrow(violation("uk_reservations_reservation_no"));
+
+        assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private Member member() {
+        return Member.builder()
+                .email("test@tikkit.com").password("encoded").name("홍길동").phone("010-1111-2222")
+                .role(MemberRole.USER).build();
+    }
+
+    /** 스프링이 감싸는 모양 그대로 만든다 — 서비스는 원인 체인에서 제약명을 꺼낸다. */
+    private DataIntegrityViolationException violation(String constraintName) {
+        return new DataIntegrityViolationException("중복 키",
+                new ConstraintViolationException("중복 키", new SQLException("23505"), constraintName));
     }
 
     private TicketGrade ticketGrade(Instant bookingOpenAt, Instant bookingCloseAt, int remainingQuantity) {

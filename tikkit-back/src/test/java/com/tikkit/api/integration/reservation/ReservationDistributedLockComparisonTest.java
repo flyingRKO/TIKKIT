@@ -154,19 +154,17 @@ class ReservationDistributedLockComparisonTest extends AbstractRedisConcurrencyT
                     .as("[%s] 모든 요청이 201 또는 409 중복으로 끝났다", mode).isEqualTo(DUPLICATE_THREADS);
             assertThat(round.pendingCount()).as("[%s] 201 건수와 PENDING 건수가 일치한다", mode)
                     .isEqualTo(round.created());
-            assertThat(round.pendingCount()).as("[%s] 최소 한 건은 선점됐다", mode).isPositive();
 
-            if (mode == HoldMode.LOCK_MEMBER_GRADE) {
-                assertThat(round.pendingCount())
-                        .as("[%s] 트랜잭션 밖 분산 락은 중복을 막는다", mode).isEqualTo(1);
-            }
-            if (mode == HoldMode.LOCK_MEMBER_GRADE_IN_TX_DELAYED) {
-                // 커밋 전에 락이 풀리면 다음 스레드가 미커밋 INSERT를 못 보고 통과한다.
-                // 정확히 2건이 나오는 이유: 1번이 해제 후 2ms 자는 사이 2번만 들어오고,
-                // 2번이 자는 동안에는 1번이 이미 커밋돼서 3번부터는 409가 된다.
-                assertThat(round.pendingCount())
-                        .as("[%s] 커밋 전 해제는 중복을 막지 못한다", mode).isGreaterThan(1);
-            }
+            // V3_2의 부분 유니크 인덱스가 들어온 뒤로는 네 arm 모두 1건이다.
+            // 분산 락이 있든 없든, 심지어 커밋 전에 풀어서 잘못 걸어도 결과가 같다 —
+            // 축 A에서 조건부 UPDATE가 보여준 것과 똑같은 구도다.
+            // 인덱스 적용 전 PLAIN은 20건이었다 (커밋 be81103의 측정 표 참조).
+            assertThat(round.pendingCount())
+                    .as("[%s] 부분 유니크 인덱스가 중복을 막는다", mode).isEqualTo(1);
+            assertThat(round.rejected()).as("[%s] 나머지는 모두 거절됐다", mode)
+                    .isEqualTo(DUPLICATE_THREADS - 1);
+            assertThat(round.remaining()).as("[%s] 거절된 요청의 재고는 롤백됐다", mode)
+                    .isEqualTo(DUPLICATE_THREADS - 1);
         }
     }
 

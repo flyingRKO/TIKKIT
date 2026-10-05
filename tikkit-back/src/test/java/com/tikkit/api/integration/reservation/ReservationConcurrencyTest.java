@@ -53,9 +53,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *       이미 받은 PG 승인은 보상 환불한다</li>
  * </ul>
  * <p>
- * Task 020에서 세 번째 시나리오(중복 선점 가드의 check-then-insert 레이스)를 추가했다. 이쪽은
- * 아직 <b>잘못된 동작을 단정</b>하는 상태다 — 조건부 UPDATE로 묶을 수 없는 경쟁이라
- * Task 020에서 Redis 분산 락과 부분 유니크 인덱스를 비교한 뒤 단정을 뒤집는다.
+ * Task 020에서 세 번째 시나리오(중복 선점 가드)가 추가됐다. {@code existsBy...} 후 INSERT는
+ * 한 문장으로 묶을 수 없어 조건부 UPDATE로 막히지 않는다. Redis 분산 락과 부분 유니크 인덱스를
+ * 비교한 뒤 <b>인덱스</b>를 택했고({@code V3_2}), 그 결과가 아래 세 번째 테스트다.
+ * 비교 수치는 {@code docs/improvements/003-redis-distributed-lock.md}에 있다.
  *
  * @see com.tikkit.api.domain.reservation.service.ReservationService#create
  * @see com.tikkit.api.domain.performance.repository.TicketGradeRepository#decreaseRemainingQuantity
@@ -170,8 +171,8 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
 
     @Test
     @Timeout(120)
-    @DisplayName("같은 회원이 같은 등급에 동시에 선점하면 중복 PENDING이 생긴다 (Task 020에서 해결)")
-    void 중복_선점_가드_레이스() throws Exception {
+    @DisplayName("같은 회원이 같은 등급에 동시에 선점하면 한 건만 성공하고 나머지는 거절된다")
+    void 중복_선점_차단() throws Exception {
         // given: 재고를 스레드 수만큼 둔다 — 여기서 재는 건 재고 경쟁이 아니라 (회원, 등급) 중복 선점
         // 가드이므로, 재고가 모자라서 SOLD_OUT이 섞이면 무엇이 거절된 건지 알 수 없다.
         TicketGrade grade = createOnSaleGrade(DUPLICATE_THREAD_COUNT);
@@ -218,8 +219,8 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         int remaining = remainingOf(gradeId);
 
         log.info("""
-                [중복 선점 가드 레이스] 요청 {}건 / 201 성공 {}건 / 409 중복 {}건 / 그 외 {}건
-                            같은 (회원, 등급)의 PENDING {}건 (정상이라면 1건) / 잔여 {} vs 총재고 {}""",
+                [중복 선점 차단] 요청 {}건 / 201 성공 {}건 / 409 중복 {}건 / 그 외 {}건
+                            같은 (회원, 등급)의 PENDING {}건 (1건이어야 한다) / 잔여 {} vs 총재고 {}""",
                 DUPLICATE_THREAD_COUNT, created.get(), duplicate.get(), unexpected.size(),
                 pendingCount, remaining, DUPLICATE_THREAD_COUNT);
 
@@ -231,16 +232,18 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         assertThat(pendingCount).as("201을 받은 요청 수와 남은 PENDING 수가 일치한다")
                 .isEqualTo(created.get());
 
-        // ↓↓↓ Task 020에서 뒤집을 단정 ↓↓↓
-        // existsByMemberIdAndTicketGradeIdAndStatus로 확인한 뒤 INSERT하는 check-then-insert 구조라
-        // 동시 요청이 전부 가드를 통과한다. 재고 차감(조건부 UPDATE)은 행 락으로 직렬화되지만
-        // 가드 통과 여부는 그 전에 이미 결정돼 있어서 막아주지 못한다.
-        // Task 020에서 부분 유니크 인덱스를 넣은 뒤 isEqualTo(1) / duplicate == 19로 뒤집는다.
-        assertThat(pendingCount).as("중복 선점이 실제로 발생한다 (현재의 잘못된 동작)").isGreaterThan(1);
-        // ↑↑↑ 여기까지 ↑↑↑
+        // V3_2의 부분 유니크 인덱스가 최종 방어선이다 (Task 020).
+        // existsBy... 가드는 check-then-insert라 동시 요청에 뚫리고(Task 020 전에는 20건 전원 통과),
+        // Redis 분산 락으로도 막히지만 "모든 쓰기 경로가 같은 키로 락을 잡아야 한다"는 전역 규약을
+        // 요구한다. 제약은 경로와 무관하게 성립한다 — 비교 수치는
+        // docs/improvements/003-redis-distributed-lock.md에 있다.
+        assertThat(pendingCount).as("같은 (회원, 등급)의 PENDING은 정확히 한 건이다").isEqualTo(1);
+        assertThat(created.get()).as("한 요청만 선점에 성공했다").isEqualTo(1);
+        assertThat(duplicate.get()).as("나머지는 모두 중복으로 거절됐다")
+                .isEqualTo(DUPLICATE_THREAD_COUNT - 1);
 
-        assertThat(pendingCount + remaining).as("재고 불변식(판매 + 잔여 = 총재고)은 지켜진다")
-                .isEqualTo(DUPLICATE_THREAD_COUNT);
+        assertThat(remaining).as("거절된 요청의 재고는 롤백돼 그대로 남았다")
+                .isEqualTo(DUPLICATE_THREAD_COUNT - 1);
     }
 
     @Test
