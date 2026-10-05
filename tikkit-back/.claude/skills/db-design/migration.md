@@ -4,6 +4,9 @@
 
 - 스키마 변경: `V{n}__description.sql` (예: `V4__create_seat_tables.sql`)
 - 시드 데이터: `V{n}_{m}__seed_description.sql` (예: `V1_1__seed_dev_data.sql`) — 메인 버전 시퀀스(`V1`, `V2`, ...)와 분리해, 버전 이력만 보면 스키마 변화가 바로 보이게 한다.
+- `V{n}_{m}`은 다음 두 경우에만 쓴다.
+  1. 위처럼 시드 데이터
+  2. **`docs/ERD.md`에 미래 버전 번호가 이미 예약돼 있을 때 그걸 밀지 않기 위한 소소한 스키마 추가.** 예: V4~V8이 Phase 6~9 계획으로 잡혀 있는 상태에서 Task 019의 `version` 컬럼 제거는 `V3_1`, Task 020의 부분 유니크 인덱스 추가는 `V3_2`를 썼다. Flyway는 `V3_2`를 3.2로 해석해 3.1과 4 사이에 끼운다. 번호를 밀면 ERD 이력 표와 ROADMAP 여러 곳을 같이 고쳐야 한다.
 - 시드는 `spring.flyway.locations`로 dev 프로필에서만 로드한다. 테스트·운영 DB에는 절대 섞이지 않아야 한다.
 - 마이그레이션 파일명은 실제 테이블명(복수형)을 기준으로 짓는다: `V3__add_version_to_ticket_grades.sql` (❌ `..._ticket_grade.sql`).
 - `ddl-auto`는 `validate`로 고정한다. Hibernate가 스키마를 암묵적으로 바꾸게 두지 않는다.

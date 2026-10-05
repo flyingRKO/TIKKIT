@@ -262,7 +262,7 @@ DROP에 V4를 쓰면 ERD와 ROADMAP 7곳의 번호가 밀린다. Flyway는 `V3_1
 - **중복 선점 가드는 아직 동시 요청에 취약하다.** `ReservationService.create()`의
   `existsByMemberIdAndTicketGradeIdAndStatus` 체크와 INSERT 사이에 락이 없어서, 같은 회원의 동시 요청
   2건이 둘 다 통과할 수 있다. 정답은 `UNIQUE(member_id, ticket_grade_id) WHERE status = 'PENDING'`
-  부분 유니크 인덱스인데, 마이그레이션 번호를 또 소모하므로 범위 밖으로 뒀다.
+  부분 유니크 인덱스인데, 마이그레이션 번호를 또 소모하므로 범위 밖으로 뒀다. **→ Task 020에서 `V3_2`로 해결** ([003](./003-redis-distributed-lock.md)).
 - **보상 환불은 최선 노력(best effort)이다.** 환불 호출이 실패하면 로그만 남긴다. 그 트랜잭션은 곧
   롤백되므로 실패 사실을 DB에 남길 수 없다 — 영속적 보상에는 아웃박스 테이블 + 정산 배치 + PG 멱등키가
   필요하고, 이건 Phase 7(운영 기반) 규모의 작업이다. `MockPaymentGateway`는 환불이 실패하지 않으므로
@@ -280,6 +280,9 @@ DROP에 V4를 쓰면 ERD와 ROADMAP 7곳의 번호가 밀린다. Flyway는 `V3_1
 
 [Task 020: Redis 분산 락 비교 실험](./003-redis-distributed-lock.md) — DB 락으로 충분한지,
 분산 락이 단일 DB 환경에서 필요한지 비교한다. "커밋 전 락 해제" 함정도 함께 정리한다.
+
+**결과**: 단일 DB에서는 불필요하다는 결론이 나왔다. 재고 경쟁은 정확성이 동일한데 분산 락이 6~7배
+느렸고, 위의 "중복 선점 가드" 한계는 부분 유니크 인덱스(`V3_2`)로 해결했다.
 
 ## 재현 방법
 

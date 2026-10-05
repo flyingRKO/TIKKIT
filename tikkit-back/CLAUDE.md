@@ -12,6 +12,8 @@
 | Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
 | Spring Web | - | REST API |
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
+| Redis | 7 | 캐시·대기열 (Task 020 도입, `REDIS_ENABLED=true`일 때만 연결) |
+| Redisson | 3.50.0 | Redis 클라이언트 |
 | Lombok | - | 보일러플레이트 코드 감소 |
 | JUnit 5 | - | 테스트 프레임워크 |
 
@@ -123,7 +125,7 @@ cp .env.example .env
 ```
 
 ```bash
-# PostgreSQL 컨테이너 실행 (Docker Desktop이 켜져 있어야 한다)
+# PostgreSQL + Redis 컨테이너 실행 (Docker Desktop이 켜져 있어야 한다)
 docker-compose up -d
 
 # 접속 정보 (application-dev.yml 참조)
@@ -133,6 +135,8 @@ docker-compose up -d
 ```
 
 DB 자격증명은 `application-dev.yml`에서 `${DB_USERNAME:tikkit_user}` 형태의 기본값을 쓴다. 평소엔 아무 설정 없이 `.env`의 값과 동일하게 동작하고, 필요할 때만(CI 등) `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` 환경변수로 재정의한다.
+
+Redis는 `tikkit.redis.enabled`가 기본 `false`라 애플리케이션이 연결하지 않는다. Redis 없이도 기동과 테스트가 돌아야 하기 때문이다 — 이유는 `docs/improvements/003-redis-distributed-lock.md` 3절. 쓰려면 `REDIS_ENABLED=true`로 실행한다. 캐시(Task 029)·대기열(Task 031)에서 본격적으로 쓴다.
 
 ## 에이전트 안내
 

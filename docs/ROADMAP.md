@@ -154,7 +154,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `v0.1.0-mvp` 태그 생성 (PR #12 머지 후 main의 `a13c24c`에 주석 태그로 생성)
   - 알려진 한계: 시드 공연 날짜가 "시드 적용 시점" 기준이라 같은 DB를 약 50일 넘게 쓰면 예매중 공연이 없어져 E2E가 실패한다(`docker-compose down -v`로 초기화). E2E가 가입시킨 회원은 DB에 남는다(삭제 API 없음). 시드에 포스터 URL이 없어 스크린샷의 포스터는 placeholder다
 
-### Phase 5: 동시성 제어 고도화
+### Phase 5: 동시성 제어 고도화 ✅
 
 - **Task 018: [BE] 초과 판매 재현 테스트** ✅ - 완료
   - ✅ 좌석 10석에 100개 스레드로 동시 요청 (ExecutorService + 출발선 CountDownLatch), 초과 판매 재현. 4회 반복 모두 **100건 전원 성공(판매 100매 vs 총재고 10)**, `SOLD_OUT` 0건. 동시 진입한 트랜잭션들이 같은 값을 읽고 전부 `값-1`을 절대값으로 쓰므로 재고가 "세대당 1"씩만 줄어 재고 부족 검증이 아예 발동하지 않는다
@@ -177,11 +177,21 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `V3_1__drop_version_from_ticket_grades.sql`로 `version` 제거. `V4`가 아니라 `V3_1`을 쓴 이유는 ERD 이력에 V4~V8이 미래 계획으로 잡혀 있어 번호가 7곳 밀리기 때문이다 (Flyway는 3.1로 해석해 V3와 V4 사이에 끼운다)
   - ✅ `docs/improvements/002-db-lock-comparison.md` 작성, `001`의 "해결안 비교" 절 채움, README "알려진 한계" 2개를 해결됨으로 갱신
   - 알려진 한계: 중복 선점 가드(`existsBy...` + INSERT)는 여전히 동시 요청에 취약하다 — `UNIQUE(member_id, ticket_grade_id) WHERE status='PENDING'` 부분 유니크 인덱스가 정답이지만 마이그레이션 번호를 또 소모해 범위 밖으로 뒀다. 보상 환불은 최선 노력이라 환불 실패 시 로그만 남는다(영속적 보상은 아웃박스+정산 배치가 필요, Phase 7). `DataIntegrityViolationException`은 여전히 500이다(예약번호 시퀀스 한 바퀴, 동시 이중 결제 등 Task 019와 무관한 제약). 측정은 로컬 Docker 기준이라 절대 수치가 아니라 전략 간 상대 비교로 읽어야 한다
-- **Task 020: [BE] Redis 분산 락 비교 실험**
-  - docker-compose에 Redis 추가, Redisson `@DistributedLock` AOP 구현
-  - "커밋 전 락 해제" 함정과 해결 방법 정리
-  - DB 방식과 비교 후 "단일 DB에서는 불필요" 결론 도출
-  - `docs/improvements/003-redis-distributed-lock.md` 작성, `v0.2.0-concurrency` 태그
+- **Task 020: [BE] Redis 분산 락 비교 실험** ✅ - 완료
+  - ✅ docker-compose에 Redis 7 추가(볼륨 없음, 영속화 끔), `tikkit.redis.enabled` **기본 false**로 둬서 Redis 없이도 기동·테스트가 돈다. `redisson-spring-boot-starter`를 쓰지 않고 core `redisson:3.50.0` + 직접 만든 `RedissonClient` 빈을 쓴 이유는 **스타터 자동설정이 기동 시점에 즉시 연결하고 실패하면 컨텍스트를 깨뜨리기** 때문이다 (CI의 backend 잡과 평소 로컬 개발이 전부 막힌다). `redisson-spring-data-NN` 버전 매트릭스도 따라붙는데 `RLock`만 쓰므로 spring-data-redis가 필요 없다
+  - ✅ `@DistributedLock` AOP 구현(SpEL 키, `tryLock(waitTime, leaseTime)`, `isHeldByCurrentThread()` 가드). **이 프로젝트의 첫 커스텀 Aspect**였고 비교 후 제거했다
+  - ✅ **축 A — 재고 차감**(10석·100스레드): 정확성은 세 arm 모두 동일(판매 10매)인데 **분산 락이 6~7배 느리다**. 총 소요 80~104ms(조건부 UPDATE 단독) vs 519~673ms(락, 트랜잭션 밖) vs 438~480ms(락, 커밋 전 해제)
+  - ✅ **축 A에서 "커밋 전 락 해제" 함정이 수치로 드러나지 않는다** — 락을 잘못 걸어도 판매는 정확히 10매다. 아래 깔린 조건부 UPDATE가 받쳐주기 때문이다. 즉 **분산 락의 정합성은 자기 자신이 증명하지 못하고 DB 보장이 증명해준다**. 게다가 함정 arm이 **오히려 빠르다**(438~480 vs 519~673) — 커밋 전에 락을 풀면 다음 스레드가 앞 스레드의 커밋과 겹쳐 돌 수 있어서, 정합성을 팔아 처리량을 산 셈이고 벤치마크만 보면 "더 나은 구현"으로 보인다
+  - ✅ **축 B — 중복 선점 가드**(같은 회원·20스레드): Task 019가 한계로 남긴 `existsBy...` 후 INSERT 레이스를 먼저 재현했다. **20건 전원 통과**(PENDING 20건). 일부가 아니라 전부인 이유 — 재고 차감이 조건부 UPDATE로 직렬화되는데도 **가드 통과 여부는 락을 잡기 전에 이미 결정**돼서, 뒤에서 행 락이 직렬화해 줘도 앞의 판단을 되돌리지 못한다
+  - ✅ 축 B에서 분산 락은 막아준다(1건). 하지만 `V3_2` 부분 유니크 인덱스(`UNIQUE(member_id, ticket_grade_id) WHERE status='PENDING'`)를 넣은 뒤로는 **락 없이도 1건**이고, **일부러 락을 잘못 건 arm(커밋 전 해제 + 2ms 지연)도 1건**이 된다. 축 A와 똑같은 구도다. 락이 반드시 필요했던 유일한 자리마저 제약으로 메워져 이제 락이 하는 일은 지연 2배(41~46ms → 81ms)뿐이다
+  - ✅ **"단일 DB에서는 불필요" 결론**. 결정적 근거는 성능이 아니라 구조다 — 분산 락은 "모든 쓰기 경로가 같은 키로 락을 잡아야 한다"는 전역 규약을 요구하고 아무것도 강제하지 않는다(Task 019가 낙관적 락을 기각한 논리와 같다). DB 제약은 어느 경로로 들어와도 성립한다
+  - ✅ **중복 선점은 부분 유니크 인덱스로 영구 채택**(`V3_2`, Task 019 알려진 한계 해소). `DataIntegrityViolationException`을 서비스에서 제약명으로 가려 409 `DUPLICATE_PENDING_RESERVATION`으로 바꿔 **새 에러 코드 없이 기존 계약을 유지**했다. `GlobalExceptionHandler`에 두지 않은 이유는 거기서는 제약을 구분할 수 없어 예약번호·이중결제 위반까지 뭉개기 때문이다. `Reservation`의 PK가 `IDENTITY`라 `save()` 시점에 INSERT가 나가서 서비스 안에서 잡을 수 있다(`SEQUENCE`면 커밋 시점에 터져 못 잡는다). `existsBy` 가드는 재고를 깎고 롤백하는 낭비를 줄이는 빠른 경로로 남겼다
+  - ✅ 재현 테스트의 단정을 뒤집어 **회귀 테스트로 전환**(`중복_선점_차단`: 201 1건 / 409 19건 / PENDING 1건 / 잔여 19)
+  - ✅ 구현 함정 6개 정리: **`@Order(HIGHEST_PRECEDENCE)`는 너무 높아서 깨진다**(`ExposeInvocationInterceptor`가 `HIGHEST_PRECEDENCE + 1`이고 그게 먼저 돌아야 `@annotation(x)` 바인딩이 성립 → `@Order(0)`) / `@Order`를 안 주면 트랜잭션 어드바이저와 동점이 되어 순서가 미정의 / `@Order`만으로 락을 트랜잭션 안쪽에 둘 수 없다 / 자기 호출은 Aspect를 건너뛴다 / 조건부 빈은 락을 조용히 무력화한다 / **`src/test`의 `@RestController`는 모든 테스트 컨텍스트에 스캔된다**(무관한 테스트 59개가 깨져서 패키지를 `com.tikkit.api` 밖으로 옮겼다. `@RequestMapping`만 남기는 우회는 Spring 6.2의 `isHandler()`가 `@Controller`만 보기 때문에 통하지 않는다)
+  - ✅ 실험 종료 후 정리: `@DistributedLock` AOP·측정 하네스·`spring-boot-starter-aop`·`LOCK_ACQUISITION_FAILED` 제거(`17 insertions, 931 deletions`). **Redis 인프라는 남긴다**(Task 029 캐싱·031 대기열에서 재사용). 실험 코드를 `src/test`에 둔 덕에 정리 커밋이 파일 삭제로 끝났다 — Task 019는 전략을 런타임에 갈아끼워야 해서 main에 뒀고 정리 때 운영 코드 여러 곳을 건드려야 했다
+  - ✅ `docs/improvements/003-redis-distributed-lock.md` 작성, `002`의 "다음 단계"에 결과 기록, README에 "중복 선점 차단(해결됨)" 섹션 추가, ERD·`db-design` 스킬의 서브버전 규칙 갱신
+  - ✅ `v0.2.0-concurrency` 태그 생성
+  - 알려진 한계: 결론은 **단일 DB 전제**에서만 유효하다 — DB를 샤딩하거나 DB 밖 자원(외부 API 쿼터, 파일)을 보호해야 하면 분산 락 외에 선택지가 없다. Testcontainers Redis는 같은 호스트 루프백이라 **측정된 Redis 오버헤드는 하한**이다(운영은 0.5~2ms). 단일 인스턴스를 썼으므로 Redlock 논쟁은 범위 밖이다. 인덱스는 `PENDING`만 제한하므로 같은 회원의 `CONFIRMED` 중복은 여전히 허용된다(의도된 동작). `DataIntegrityViolationException` 일반 매핑은 아직 500이다(`uk_reservations_reservation_no`, `uk_payments_reservation_id`). 측정은 로컬 Docker 기준이라 **방식 간 상대 비교**로만 읽어야 한다
 
 ### Phase 6: 지정석 전환
 
@@ -287,4 +297,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-10-04
-**📊 진행 상황**: Phase 4 완료, Phase 5 진행 중 (19/34 Tasks 완료)
+**📊 진행 상황**: Phase 5 완료, Phase 6 진행 예정 (20/34 Tasks 완료)
