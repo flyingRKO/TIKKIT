@@ -52,6 +52,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *   <li>결제가 만료 처리를 덮어쓰는 경쟁 — 상태를 WHERE 절에 넣은 조건부 UPDATE로 막고,
  *       이미 받은 PG 승인은 보상 환불한다</li>
  * </ul>
+ * <p>
+ * Task 020에서 세 번째 시나리오(중복 선점 가드의 check-then-insert 레이스)를 추가했다. 이쪽은
+ * 아직 <b>잘못된 동작을 단정</b>하는 상태다 — 조건부 UPDATE로 묶을 수 없는 경쟁이라
+ * Task 020에서 Redis 분산 락과 부분 유니크 인덱스를 비교한 뒤 단정을 뒤집는다.
  *
  * @see com.tikkit.api.domain.reservation.service.ReservationService#create
  * @see com.tikkit.api.domain.performance.repository.TicketGradeRepository#decreaseRemainingQuantity
@@ -65,6 +69,12 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
 
     private static final int TOTAL_QUANTITY = 10;
     private static final int THREAD_COUNT = 100;
+
+    /**
+     * 중복 선점 가드 재현용 스레드 수. 같은 회원이므로 성공은 어차피 1건이어야 하고,
+     * 100개까지 늘릴 필요가 없다 (Task 020의 Redis 락 비교에서도 같은 값을 쓴다).
+     */
+    private static final int DUPLICATE_THREAD_COUNT = 20;
 
     /** 실제 PG의 승인 왕복 지연을 모사하는 값. 만료 트리거(1.5초)보다 충분히 길어야 경쟁이 성립한다. */
     private static final Duration PG_APPROVE_DELAY = Duration.ofSeconds(5);
@@ -117,7 +127,7 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
                     try {
                         ready.countDown();
                         start.await();
-                        classify(reserve(session, scheduleId, gradeId), created, soldOut, unexpected);
+                        classify(reserve(session, scheduleId, gradeId), "SOLD_OUT", created, soldOut, unexpected);
                     } catch (Exception e) {
                         unexpected.add("예외: " + e);
                     } finally {
@@ -156,6 +166,81 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         assertThat(soldQuantity + remaining).as("재고 불변식(판매 + 잔여 = 총재고)이 지켜졌다")
                 .isEqualTo(TOTAL_QUANTITY);
         assertThat(remaining).as("재고가 정확히 소진됐다").isZero();
+    }
+
+    @Test
+    @Timeout(120)
+    @DisplayName("같은 회원이 같은 등급에 동시에 선점하면 중복 PENDING이 생긴다 (Task 020에서 해결)")
+    void 중복_선점_가드_레이스() throws Exception {
+        // given: 재고를 스레드 수만큼 둔다 — 여기서 재는 건 재고 경쟁이 아니라 (회원, 등급) 중복 선점
+        // 가드이므로, 재고가 모자라서 SOLD_OUT이 섞이면 무엇이 거절된 건지 알 수 없다.
+        TicketGrade grade = createOnSaleGrade(DUPLICATE_THREAD_COUNT);
+        Long gradeId = grade.getId();
+        Long scheduleId = grade.getSchedule().getId();
+        List<MockHttpSession> sessions = createOneMemberWithSessions(DUPLICATE_THREAD_COUNT);
+
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger duplicate = new AtomicInteger();
+        Queue<String> unexpected = new ConcurrentLinkedQueue<>();
+
+        // 출발선을 맞춰야 재현된다. existsBy...는 READ COMMITTED에서 커밋된 행만 보므로,
+        // 먼저 들어온 요청이 커밋을 끝내기 전에 다른 요청들이 가드를 통과해야 중복이 생긴다.
+        CountDownLatch ready = new CountDownLatch(DUPLICATE_THREAD_COUNT);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(DUPLICATE_THREAD_COUNT);
+        ExecutorService executor = Executors.newFixedThreadPool(DUPLICATE_THREAD_COUNT);
+
+        // when: 같은 회원이 같은 등급에 동시에 20번 선점 요청
+        try {
+            for (MockHttpSession session : sessions) {
+                executor.submit(() -> {
+                    try {
+                        ready.countDown();
+                        start.await();
+                        classify(reserve(session, scheduleId, gradeId),
+                                "DUPLICATE_PENDING_RESERVATION", created, duplicate, unexpected);
+                    } catch (Exception e) {
+                        unexpected.add("예외: " + e);
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+            assertThat(ready.await(30, TimeUnit.SECONDS)).as("모든 스레드가 출발선에 모였다").isTrue();
+            start.countDown();
+            assertThat(done.await(60, TimeUnit.SECONDS)).as("모든 요청이 끝났다").isTrue();
+        } finally {
+            executor.shutdownNow();
+        }
+
+        // then: 이 테스트에는 회원이 한 명뿐이라 등급 기준 집계가 곧 (회원, 등급) 기준 집계다.
+        int pendingCount = pendingCountOf(gradeId);
+        int remaining = remainingOf(gradeId);
+
+        log.info("""
+                [중복 선점 가드 레이스] 요청 {}건 / 201 성공 {}건 / 409 중복 {}건 / 그 외 {}건
+                            같은 (회원, 등급)의 PENDING {}건 (정상이라면 1건) / 잔여 {} vs 총재고 {}""",
+                DUPLICATE_THREAD_COUNT, created.get(), duplicate.get(), unexpected.size(),
+                pendingCount, remaining, DUPLICATE_THREAD_COUNT);
+
+        assertThat(unexpected).as("예상 밖 응답·예외가 없어야 결과를 신뢰할 수 있다").isEmpty();
+        assertThat(created.get() + duplicate.get()).as("모든 요청이 201 또는 409로 끝났다")
+                .isEqualTo(DUPLICATE_THREAD_COUNT);
+
+        // 성공 건수와 PENDING 건수는 같아야 한다 — 재고가 충분하므로 201을 받은 요청은 모두 행을 남긴다.
+        assertThat(pendingCount).as("201을 받은 요청 수와 남은 PENDING 수가 일치한다")
+                .isEqualTo(created.get());
+
+        // ↓↓↓ Task 020에서 뒤집을 단정 ↓↓↓
+        // existsByMemberIdAndTicketGradeIdAndStatus로 확인한 뒤 INSERT하는 check-then-insert 구조라
+        // 동시 요청이 전부 가드를 통과한다. 재고 차감(조건부 UPDATE)은 행 락으로 직렬화되지만
+        // 가드 통과 여부는 그 전에 이미 결정돼 있어서 막아주지 못한다.
+        // Task 020에서 부분 유니크 인덱스를 넣은 뒤 isEqualTo(1) / duplicate == 19로 뒤집는다.
+        assertThat(pendingCount).as("중복 선점이 실제로 발생한다 (현재의 잘못된 동작)").isGreaterThan(1);
+        // ↑↑↑ 여기까지 ↑↑↑
+
+        assertThat(pendingCount + remaining).as("재고 불변식(판매 + 잔여 = 총재고)은 지켜진다")
+                .isEqualTo(DUPLICATE_THREAD_COUNT);
     }
 
     @Test
@@ -286,11 +371,13 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         return new Response(result.getResponse().getStatus(), objectMapper.readTree(body).path("code").asText());
     }
 
-    private void classify(Response response, AtomicInteger created, AtomicInteger soldOut, Queue<String> unexpected) {
+    /** 선점 응답을 201 성공 / 409(기대한 에러 코드) 거절 / 그 외로 분류한다. */
+    private void classify(Response response, String expectedRejectCode,
+                          AtomicInteger created, AtomicInteger rejected, Queue<String> unexpected) {
         if (response.status() == 201) {
             created.incrementAndGet();
-        } else if (response.status() == 409 && "SOLD_OUT".equals(response.code())) {
-            soldOut.incrementAndGet();
+        } else if (response.status() == 409 && expectedRejectCode.equals(response.code())) {
+            rejected.incrementAndGet();
         } else {
             unexpected.add(response.toString());
         }
@@ -307,6 +394,14 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
     private int remainingOf(Long gradeId) {
         return jdbcTemplate.queryForObject(
                 "SELECT remaining_quantity FROM ticket_grades WHERE id = ?", Integer.class, gradeId);
+    }
+
+    /** 해당 등급에 남아 있는 PENDING 예약 건수. 중복 선점이 몇 건 생겼는지를 직접 센다. */
+    private int pendingCountOf(Long gradeId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM reservations
+                WHERE ticket_grade_id = ? AND status = 'PENDING'
+                """, Integer.class, gradeId);
     }
 
     private record Response(int status, String code) {
