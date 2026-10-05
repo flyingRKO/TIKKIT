@@ -58,9 +58,6 @@ dependencies {
     // Redis가 없으면 컨텍스트 기동 자체가 깨진다.
     implementation 'org.redisson:redisson:3.50.0'
 
-    // AOP (Task 020의 @DistributedLock 전용 — 비교 실험이 끝나면 제거한다)
-    implementation 'org.springframework.boot:spring-boot-starter-aop'
-
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'org.assertj:assertj-core:3.24.2'
