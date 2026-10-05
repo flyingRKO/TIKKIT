@@ -13,7 +13,6 @@ import org.redisson.api.RedissonClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.expression.MethodBasedEvaluationContext;
 import org.springframework.core.DefaultParameterNameDiscoverer;
-import org.springframework.core.Ordered;
 import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.core.annotation.Order;
 import org.springframework.expression.EvaluationContext;
@@ -27,18 +26,29 @@ import java.lang.reflect.Method;
 /**
  * {@link DistributedLock}이 붙은 메서드를 Redis 분산 락으로 감싼다 (Task 020 비교 실험 전용).
  *
- * <h2>왜 @Order(HIGHEST_PRECEDENCE)인가</h2>
- * {@code @EnableTransactionManagement}의 {@code order} 기본값은 {@code Ordered.LOWEST_PRECEDENCE}
- * ({@code Integer.MAX_VALUE})다. 어드바이저는 order 오름차순으로 적용되고 값이 작을수록 바깥이므로,
- * 이 값을 주면 락이 트랜잭션보다 바깥에 와서 <b>커밋이 끝난 뒤에</b> 락이 풀린다.
+ * <h2>왜 @Order(0)인가 — 위아래 양쪽에 경계가 있다</h2>
+ * <b>위쪽 경계(트랜잭션):</b> {@code @EnableTransactionManagement}의 {@code order} 기본값은
+ * {@code Ordered.LOWEST_PRECEDENCE}({@code Integer.MAX_VALUE})다. 어드바이저는 order 오름차순으로
+ * 적용되고 값이 작을수록 바깥이므로, {@code MAX_VALUE}보다 작은 값이면 락이 트랜잭션보다 바깥에 와서
+ * <b>커밋이 끝난 뒤에</b> 풀린다.
  * <p>
- * 값을 주지 않으면 Aspect도 {@code LOWEST_PRECEDENCE}로 취급되어 트랜잭션 어드바이저와 동점이 되고,
- * 정렬이 안정 정렬이라 둘의 상대 순서가 어드바이저 수집 순서(빈 정의 순서)에 좌우된다. 즉
- * <b>실질적으로 미정의</b>다. 운이 나쁘면 락이 트랜잭션 안으로 들어가고, 아래에 조건부 UPDATE가
+ * 값을 아예 주지 않으면 Aspect도 {@code LOWEST_PRECEDENCE}로 취급되어 트랜잭션 어드바이저와 동점이
+ * 되고, 정렬이 안정 정렬이라 둘의 상대 순서가 어드바이저 수집 순서(빈 정의 순서)에 좌우된다. 즉
+ * <b>실질적으로 미정의</b>다. 운이 나쁘면 락이 트랜잭션 안으로 들어가는데, 아래에 조건부 UPDATE가
  * 깔려 있으면 결과는 정상으로 나와서 아무도 모른다.
  * <p>
- * 반대로 {@code @Order}만으로 락을 트랜잭션 <b>안쪽</b>에 둘 수는 없다 — {@code MAX_VALUE}보다 큰
- * 값이 없다. 그래서 순서는 선언으로 보장하는 게 아니라 런타임에 검증한다
+ * <b>아래쪽 경계(AspectJ 바인딩):</b> 그렇다고 {@code HIGHEST_PRECEDENCE}({@code Integer.MIN_VALUE})를
+ * 주면 깨진다. {@code @annotation(distributedLock)}으로 애노테이션을 바인딩받으려면 스프링의
+ * {@code ExposeInvocationInterceptor}가 먼저 돌아 {@code JoinPointMatch}를 심어줘야 하는데, 그
+ * 인터셉터의 order가 {@code PriorityOrdered.HIGHEST_PRECEDENCE + 1}이다. 그보다 앞서면
+ * {@code "Required to bind 2 arguments, but only bound 1 (JoinPointMatch was NOT bound in invocation)"}로
+ * 터진다.
+ * <p>
+ * 즉 트랜잭션보다는 바깥, {@code ExposeInvocationInterceptor}보다는 안쪽이어야 한다. 그 사이는
+ * 아주 넓으므로 읽기 쉬운 {@code 0}을 쓴다.
+ * <p>
+ * 순서를 선언으로 보장할 방법은 없다 — {@code @Order}만으로 락을 트랜잭션 <b>안쪽</b>에 둘 수도 없고
+ * ({@code MAX_VALUE}보다 큰 값이 없다), 잘못 두면 조용히 넘어간다. 그래서 런타임에 검증한다
  * ({@code isActualTransactionActive()} 가드).
  *
  * @see DistributedLock
@@ -46,7 +56,7 @@ import java.lang.reflect.Method;
 @Slf4j
 @Aspect
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(0)
 @ConditionalOnProperty(prefix = "tikkit.redis", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class DistributedLockAspect {
