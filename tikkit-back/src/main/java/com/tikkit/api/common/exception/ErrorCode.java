@@ -27,7 +27,11 @@ public enum ErrorCode {
     RESERVATION_EXPIRED(HttpStatus.CONFLICT, "선점 시간이 만료된 예약입니다."),
     INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 처리할 수 없는 요청입니다."),
     DUPLICATE_PENDING_RESERVATION(HttpStatus.CONFLICT, "이미 선점 중인 예약이 있습니다."),
-    CANCEL_DEADLINE_PASSED(HttpStatus.CONFLICT, "취소 가능 기한이 지났습니다.");
+    CANCEL_DEADLINE_PASSED(HttpStatus.CONFLICT, "취소 가능 기한이 지났습니다."),
+
+    // Task 020 분산 락 비교 실험 전용 — 비교가 끝나면 제거한다.
+    // 실험 코드라 docs/PRD.md 부록 B의 에러 코드 표에는 넣지 않았다.
+    LOCK_ACQUISITION_FAILED(HttpStatus.CONFLICT, "요청이 많아 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;
     private final String message;
