@@ -12,5 +12,22 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
+  # Task 020(분산 락 비교 실험)에서 도입. Task 029(캐싱)·031(대기열)에서 계속 쓴다.
+  # 애플리케이션은 기본적으로 Redis를 쓰지 않는다 (application.yml의 tikkit.redis.enabled 기본값 false).
+  redis:
+    image: redis:7.4-alpine
+    container_name: tikkit-redis
+    ports:
+      # 로컬에 이미 Redis가 떠 있으면 .env의 REDIS_PORT로 포트를 비킨다.
+      - "${REDIS_PORT:-6379}:6379"
+    # 락·캐시·대기열은 모두 날아가도 되는 데이터라 영속화를 끈다 (볼륨도 두지 않는다).
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   pgdata:

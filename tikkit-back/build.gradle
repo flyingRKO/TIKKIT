@@ -52,6 +52,15 @@ dependencies {
     // springdoc-openapi (Spring Boot 3.4용 2.x 계열 마지막 버전 - Boot 4용은 3.x 계열로 별도)
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6'
 
+    // Redisson (Redis 클라이언트). Task 020 분산 락 비교 실험에서 도입하고
+    // Task 029(캐싱)·031(대기열)에서 계속 쓴다. redisson-spring-boot-starter를 쓰지 않은 이유는
+    // docs/improvements/003-redis-distributed-lock.md 참조 — 자동설정이 기동 시점에 즉시 연결해서
+    // Redis가 없으면 컨텍스트 기동 자체가 깨진다.
+    implementation 'org.redisson:redisson:3.50.0'
+
+    // AOP (Task 020의 @DistributedLock 전용 — 비교 실험이 끝나면 제거한다)
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'org.assertj:assertj-core:3.24.2'
