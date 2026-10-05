@@ -215,6 +215,13 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - Task 024로 컨테이너화한 BE를 2개 인스턴스로 띄우고 로드밸런서(nginx 등) 뒤에 두어, 세션이 서버 메모리에만 있어 A 서버에서 로그인 후 B 서버로 요청이 가면 로그아웃되는 현상을 재현
   - Redis 세션(Spring Session Data Redis)과 JWT(stateless) 두 가지 해결책을 각각 적용해보고, Task 025의 Grafana로 응답 지연을 비교하고 강제 로그아웃(권한 회수) 가능 여부·인프라 비용도 함께 따짐
   - 최종 선택과 이유를 `docs/improvements/005-session-scaling.md`에 재현→해결→수치 형식으로 기록, `v0.4.0-ops` 태그
+- **Task 026_1: [BE] Spring Boot 4 업그레이드**
+  - Spring Boot 3.4.5 → 4.1.x. 3.4 라인의 OSS 보안 패치가 2025-12-31에 끊겼고 3.5도 2026-06-30에 끝나서, 패치를 받는 라인은 4.0/4.1뿐이다
+  - 동시에 올라가는 메이저: Spring Framework 6.2→7.0, Hibernate 6.6→7.4, Spring Security 6.4→7.1, Jackson 2→3(패키지 이동), netty 4.1→4.2(Redisson도 4.x 필요), springdoc 2.x→3.x. QueryDSL 5.1.0은 그대로다
+  - 영향 범위 실측(Task 020 시점): Jackson 직접 사용 6파일(`ApiResponse`의 `@JsonInclude`, security 핸들러 2개의 `ObjectMapper`, 통합 테스트 3개), `nativeQuery = true` 2파일(`ReservationRepository`의 만료 CTE, `PerformanceRepository`의 파생값 재계산), security 설정 5파일
+  - **Hibernate 7에서 native 쿼리와 벌크 UPDATE 동작이 바뀌는지 먼저 확인한다** — Phase 5(Task 019)의 조건부 UPDATE가 전부 거기 걸려 있다. `@Modifying(flushAutomatically = true)`의 flush 시점과 영향 행 수 반환이 핵심 검증 대상
+  - 업그레이드 후 Task 019·020의 동시성 측정을 재실행해 수치가 유지되는지 확인하고, 마이그레이션 과정을 `docs/improvements/`에 기록
+  - 번호를 `027`이 아니라 `026_1`로 붙인 이유: Task 027~033이 ERD 마이그레이션 이력과 기술 스택 표에서 참조되고 있어 번호를 밀면 여러 곳을 같이 고쳐야 한다 (마이그레이션에서 `V4` 대신 `V3_1`을 쓴 것과 같은 이유)
 
 ### Phase 8: 성능 개선
 
@@ -280,4 +287,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-10-04
-**📊 진행 상황**: Phase 4 완료, Phase 5 진행 중 (19/33 Tasks 완료)
+**📊 진행 상황**: Phase 4 완료, Phase 5 진행 중 (19/34 Tasks 완료)
