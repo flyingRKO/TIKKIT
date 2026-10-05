@@ -190,7 +190,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 구현 함정 6개 정리: **`@Order(HIGHEST_PRECEDENCE)`는 너무 높아서 깨진다**(`ExposeInvocationInterceptor`가 `HIGHEST_PRECEDENCE + 1`이고 그게 먼저 돌아야 `@annotation(x)` 바인딩이 성립 → `@Order(0)`) / `@Order`를 안 주면 트랜잭션 어드바이저와 동점이 되어 순서가 미정의 / `@Order`만으로 락을 트랜잭션 안쪽에 둘 수 없다 / 자기 호출은 Aspect를 건너뛴다 / 조건부 빈은 락을 조용히 무력화한다 / **`src/test`의 `@RestController`는 모든 테스트 컨텍스트에 스캔된다**(무관한 테스트 59개가 깨져서 패키지를 `com.tikkit.api` 밖으로 옮겼다. `@RequestMapping`만 남기는 우회는 Spring 6.2의 `isHandler()`가 `@Controller`만 보기 때문에 통하지 않는다)
   - ✅ 실험 종료 후 정리: `@DistributedLock` AOP·측정 하네스·`spring-boot-starter-aop`·`LOCK_ACQUISITION_FAILED` 제거(`17 insertions, 931 deletions`). **Redis 인프라는 남긴다**(Task 029 캐싱·031 대기열에서 재사용). 실험 코드를 `src/test`에 둔 덕에 정리 커밋이 파일 삭제로 끝났다 — Task 019는 전략을 런타임에 갈아끼워야 해서 main에 뒀고 정리 때 운영 코드 여러 곳을 건드려야 했다
   - ✅ `docs/improvements/003-redis-distributed-lock.md` 작성, `002`의 "다음 단계"에 결과 기록, README에 "중복 선점 차단(해결됨)" 섹션 추가, ERD·`db-design` 스킬의 서브버전 규칙 갱신
-  - ✅ `v0.2.0-concurrency` 태그 생성
+  - ✅ `v0.2.0-concurrency` 태그 생성 (PR #16 머지 후 main의 `c64f7a2`에 주석 태그로 생성. 커밋 8개를 머지 커밋으로 보존했다 — `003` 문서가 삭제한 측정 코드를 커밋 SHA로 참조하므로 squash하면 재현 방법이 깨진다)
   - 알려진 한계: 결론은 **단일 DB 전제**에서만 유효하다 — DB를 샤딩하거나 DB 밖 자원(외부 API 쿼터, 파일)을 보호해야 하면 분산 락 외에 선택지가 없다. Testcontainers Redis는 같은 호스트 루프백이라 **측정된 Redis 오버헤드는 하한**이다(운영은 0.5~2ms). 단일 인스턴스를 썼으므로 Redlock 논쟁은 범위 밖이다. 인덱스는 `PENDING`만 제한하므로 같은 회원의 `CONFIRMED` 중복은 여전히 허용된다(의도된 동작). `DataIntegrityViolationException` 일반 매핑은 아직 500이다(`uk_reservations_reservation_no`, `uk_payments_reservation_id`). 측정은 로컬 Docker 기준이라 **방식 간 상대 비교**로만 읽어야 한다
 
 ### Phase 6: 지정석 전환
