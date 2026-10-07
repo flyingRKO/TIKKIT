@@ -195,16 +195,30 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 ### Phase 6: 지정석 전환
 
-- **Task 021: [공통] 지정석 스키마 설계 및 확장 마이그레이션**
-  - `docs/ERD.md`에 지정석 델타 반영 (seats, schedule_seats, reservation_seats — venues는 V1에 이미 있음)
-  - `V4__create_seat_tables.sql` (expand 단계, 테이블·컬럼 한국어 COMMENT 포함)
-  - `V5__backfill_seats.sql`, `V5_1__seed_venue_layouts.sql` (기존 예약을 좌석에 배정)
-  - 마이그레이션 검증 테스트 (등급별 SOLD+HELD 건수와 기존 total-remaining 일치 확인)
+- **Task 021: [공통] 지정석 스키마 설계 및 확장 마이그레이션** ✅ - 완료
+  - ✅ `docs/ERD.md`에 지정석 델타 반영 (seats, schedule_seats, reservation_seats — venues는 V1에 이미 있음). 2절에 설계가 선반영돼 있어서 ERD가 비워둔 구체 수치와 제약만 채웠다
+  - ✅ `V4__create_seat_tables.sql` (expand 단계, 테이블·컬럼 한국어 COMMENT 26개 포함). **엔티티는 만들지 않았다** — `ddl-auto: validate`는 매핑 안 된 테이블을 문제 삼지 않으므로 "애플리케이션은 좌석을 모르지만 스키마는 준비된" expand 상태가 코드로 성립한다. 엔티티 설계(상태 변경 메서드를 둘지, `reservationId`를 연관으로 둘지)는 Task 022의 선점 쿼리 모양이 정해져야 답이 나온다
+  - ✅ **`fillfactor = 90`은 `schedule_seats`에만** 걸었다. ERD는 "인덱스를 안 걸어 HOT을 보존한다"만 적었는데 **인덱스가 없어도 페이지에 빈 공간이 없으면 HOT이 깨진다** — fillfactor가 그 전제 조건이고 `CREATE TABLE` 시점에만 깔끔하게 걸린다(나중에 `ALTER`하면 이미 쓰인 페이지엔 안 먹고 `VACUUM FULL`이 필요). 반복 UPDATE가 없는 `seats`(INSERT만)·`reservation_seats`(append-only)는 기본값 100 — 10%를 비우면 저장 공간만 낭비하고 읽을 페이지가 늘어난다
+  - ✅ `ck_schedule_seats_status_holder` 추가(ERD에 없던 제약). `AVAILABLE ⟹ reservation_id IS NULL`, `HELD`/`SOLD` ⟹ NOT NULL을 **양방향으로** 걸었다 — 한쪽만 적으면 "선점이 풀렸는데 점유자가 남은" 반대 방향 모순이 통과한다. 단일 컬럼 CHECK(`seat_number >= 1`, `price >= 0`)는 V1 관행대로 이름 없는 인라인으로 뒀다
+  - ✅ **좌석 명명은 국내 예매처 관행("구역 / 열 / 번")을 따랐다.** 열은 알파벳이 아니라 숫자(`'1'`, `'23'`)다 — 서구권은 `Row A`에 `I`를 건너뛰지만 국내는 "3열 12번"이고, 숫자를 쓰면 백필에서 27열 이상을 `AA`로 넘기는 분기도 없어진다. 구역은 등급별 **좌·중앙·우 3분할**(실제 공연장 구조, `pos_x`에 통로가 자연히 생겨 배치도가 제대로 나온다). 좌석 번호는 구역마다 1번부터 재시작
+  - ✅ `V5__backfill_seats.sql` — 그리드 생성 → 등급 배정 → 기존 예약 좌석 배정. 그리드는 venue별 등급 `MAX(total_quantity)` 기준이고 열당 좌석 수는 `CASE WHEN 총좌석 <= 1000 THEN 20 ELSE 40 END`(돔에 20석/열을 쓰면 160열이 되어 실제 공연장과 동떨어진다). 블록 비율 `(좌 1, 중 2, 우 1)/4`로 두면 **열당 좌석 수가 4의 배수라 정수 나눗셈이 정확**하다 — 소수 비율은 반올림 오차로 블록 합이 어긋난다
+  - ✅ 예약 배정은 **데이터 변경 CTE 한 문장**(`expirePendingReservations`와 같은 패턴). `matched` CTE를 `held`(UPDATE)와 최종 INSERT가 **둘 다** 참조해서 Postgres 12+가 자동 materialize하고, 그래서 두 구문이 같은 매칭 결과를 본다. 한 번만 참조하면 인라인되어 각자 재계산할 수 있고 배정 좌석이 어긋날 수 있다
+  - ✅ **세 statement 모두 멱등**(`ON CONFLICT DO NOTHING` / `NOT EXISTS`)하고 `DO` 블록을 쓰지 않는다. 운영 재실행 안전성 때문만이 아니라 **검증 테스트가 이 파일을 그대로 재실행**하는 구조라 필수가 됐다(`ScriptUtils`의 세미콜론 분리가 달러 인용 본문에서 깨진다). 그래서 백필 안에서 예외를 던지는 흔한 패턴을 못 쓰고 검증을 테스트로 밀어냈다 — "어떻게 테스트할지"가 "프로덕션 SQL을 어떻게 쓸지"를 역방향으로 제약한 사례
+  - ✅ **범위 추가: `V4_1__adjust_venue_quantities.sql`(db/seed, dev 전용).** V1_1이 `CROSS JOIN`으로 모든 회차에 VIP 30 / R 80 / S 120을 똑같이 넣어서 1만 5천석 돔과 1,700석 소극장이 전부 230석이었다. 백필 공식은 이미 venue별인데 **입력이 균일해서 결과가 똑같아진다**. V1_1을 직접 고치지 않은 이유는 이미 적용된 마이그레이션이라 Flyway 체크섬이 깨지기 때문이고, 4.1은 V4 뒤·V5 앞에 돌아서 백필이 조정된 수량을 그대로 읽는다. 실제 규모의 약 1/5(고척 3200 / KSPO 3000 / 예술의전당 468 / 블루스퀘어 350)로 넣고 돔 2곳에만 A 등급을 추가했다 — `grade` CHECK에 A가 있는데 한 번도 쓰이지 않아 `--grade-a` 색상 토큰을 검수할 수 없었고, 등급 수가 공연장마다 다른 경우까지 함께 커버한다
+  - ✅ `V5_1__seed_venue_layouts.sql`(db/seed, dev 전용)은 **구역명만 다듬는 역할로 축소**했다(`VIP-중` → `VIP석 중앙`, `section`이 `varchar(10)`이라 최대 `VIP석 좌측` 7자). 원래 핵심이던 HELD/SOLD 상태 샘플은 dev DB에 예매 테스트로 쌓인 예약이 있어 V5가 알아서 배정했으므로 생략했다. 좌표 보정도 통로가 이미 들어가 있어 불필요했다. **순서에 양방향 제약이 있다** — `section`은 V5 [2/3]이 `split_part(section, '-', 1)`로 등급을 되찾는 기준이라 먼저 돌면 `schedule_seats`가 하나도 안 생기고, 거꾸로 이 UPDATE 뒤에는 구분자가 사라져 V5 수동 재실행이 매칭되지 않는다
+  - ✅ 마이그레이션 검증 테스트 2종, 새 `com.tikkit.api.migration` 패키지(레이어가 아니라 테스트 종류라 `integration/`과 나란히 둔다. 엔티티가 없어 미러링할 main 패키지도 없다). 엔티티 대신 `JdbcTemplate` — 검증 대상이 원시 SQL과 스키마 자체라 Hibernate 변환이 끼면 안 된다
+  - ✅ `SeatBackfillMigrationTest` 10개: 등급별 `SOLD+HELD == total - remaining`(로드맵 요구) 외에 `COUNT(schedule_seats) == total_quantity`(그리드 올림 여분이 새어들지 않음), SOLD/HELD 분리(점유 건수만 보면 두 상태가 뒤바뀌어도 통과한다), 예약별 좌석 수 == 매수, 가격 합 == 결제액, 취소·만료 예약 좌석 0건, 한 좌석 활성 예약 1건, **좌석 공연장 == 회차 공연장**(3홉이라 복합 FK로 표현 불가 — DB가 보장하지 못하는 유일한 불변식), 한 예약 한 등급, 멱등성
+  - ✅ 테스트 프로필은 `db/seed`를 로드하지 않아 **기동 시 V5 실행에는 검증할 데이터가 없다**. 그래서 픽스처를 넣고 `ScriptUtils`로 V5를 재실행한다. `DataSourceUtils.getConnection()`을 쓰는 게 핵심 — `dataSource.getConnection()`을 직접 부르면 테스트 트랜잭션 밖 커넥션을 받아 픽스처가 안 보이고 스크립트가 쓴 데이터가 다음 테스트로 샌다. **`EncodedResource`로 UTF-8을 명시**해야 한다(V5의 블록 이름 `'좌'`/`'중'`/`'우'`가 한글 문자열 리터럴이라 플랫폼 기본 인코딩으로 읽으면 `section` 값이 깨진다). 기각한 대안: test 전용 Flyway location에 픽스처를 넣는 방식은 싱글턴 컨테이너를 모든 컨텍스트가 공유해서 낮은 버전을 뒤늦게 들고 들어가면 Flyway가 기동을 깬다
+  - ✅ `SeatSchemaConstraintTest` 8개(`db-design/repository.md`가 요구하는 복합 FK 어긋남 테스트 포함). 제약 위반은 **메서드당 한 건**씩만 — Postgres는 위반 후 트랜잭션을 abort해 `current transaction is aborted`로 후속 쿼리를 전부 거부한다. 계획에 없던 `점유자_있는_AVAILABLE_좌석은_거부된다`를 추가해 CHECK의 반대 방향도 고정했고, `취소된_예약도_같은_좌석을_이력으로_가질_수_있다`로 `schedule_seat_id` 단독 UNIQUE를 두지 않은 설계 의도를 확인했다
+  - ✅ **`status IN (...)` CHECK는 알 수 없는 상태를 막는 역할에서 중복**이라는 걸 테스트가 드러냈다. `'RESERVED'`를 넣으면 `schedule_seats_status_check`가 아니라 `ck_schedule_seats_status_holder`가 보고된다 — 세 값 중 어느 것도 아니니 holder의 두 분기를 모두 못 만족한다. 둘 다 위반이고 어느 쪽을 보고할지는 Postgres가 정하므로 테스트에서 제약명을 고정하지 않았다. IN 목록은 허용 값을 스키마에 드러내는 문서 역할로 남긴다
+  - ✅ dev 적용 결과: `seats` 7,120 / `schedule_seats` 26,894 / `reservation_seats` 41. 공연장별 그리드가 실제로 갈라졌다(고척 80열 / 블루스퀘어 19열). 전체 테스트 125개 통과
+  - 알려진 한계: **`V5`가 PENDING 예약을 HELD로 만들지만 Task 013의 만료 배치는 좌석을 모른다.** 만료된 예약의 좌석이 HELD로 고착되며, 과거 PENDING을 건너뛰면 핵심 불변식이 깨지므로 건너뛸 수도 없다 → Task 022의 좌석 반환이 **필수 후속**이다(아직 운영 중이 아니라 실제 피해는 없다). `schedule_seats.reservation_id`를 FK로 둬서 선점 UPDATE마다 부모 `reservations` 행에 `FOR KEY SHARE` 락이 잡힌다 — 한 예약당 한 사용자라 경쟁은 낮다고 봤지만 Task 022 동시성 측정에서 multixact 오버헤드가 보일 수 있다. 열당 좌석 수(20/40)와 "VIP가 무대에 가깝다"는 배치는 PRD·ERD에 근거가 없는 자체 판단이라 Task 023 화면을 보고 조정할 수 있다. 수량 정의가 `V1_1`과 `V4_1` 두 파일에 나뉘어 있다. V6 이후에는 좌석 수의 원천이 `seats`+`schedule_seats`로 뒤집히는데 PRD "MVP 제외 범위"에 관리자 기능이 빠져 있어 **새 공연장 좌석을 만드는 경로가 시드/수동 SQL뿐**이다
 - **Task 022: [BE] 좌석 조회·선점 API 전환**
   - `GET /schedules/{id}/seats` 추가, `POST /reservations` 요청 바디에 `seatIds` 추가 (`ticketGradeId`/`quantity`는 유지 — 한 예약=한 등급 정책)
   - 선택한 `seatIds`가 모두 동일한 `ticketGradeId`에 속하는지 애플리케이션 레벨 검증 (여러 테이블에 걸친 조건이라 DB CHECK로 불가)
   - 정렬된 ID 기준 다중행 조건부 UPDATE, "좌석당 한 명만 선점 성공" 동시성 테스트
-  - 만료·취소 시 좌석 반환 처리 (`reservation_seats` 경유 UPDATE)
+  - 만료·취소 시 좌석 반환 처리 (`reservation_seats` 경유 UPDATE). **필수 후속** — V5가 기존 PENDING 예약을 HELD로 만들었지만 `ReservationExpiryScheduler`는 좌석을 모른다. 이걸 넣기 전까지 만료된 예약의 좌석이 HELD로 고착된다 (Task 021 알려진 한계)
+  - 좌석 중복 선점이 `uk_schedule_seats_schedule_seat`를 때리면 Task 020과 같은 방식으로 **서비스 레이어에서 제약명으로 가려** 409로 바꾼다. 이때 **이름 없는 CHECK의 자동 생성 이름(`{테이블}_{컬럼}_check`)에 의존하지 않는다** — 컬럼명이 바뀌거나 CHECK가 여러 개면 `_check1`, `_check2`로 붙는다 (Task 021에서 확인)
   - `V6__drop_quantity_columns.sql`: `ticket_grades`의 수량 컬럼만 제거 (contract 단계, `reservations` 스키마는 변경 없음), `docs/improvements/004-seatmap-migration.md` 작성
 - **Task 023: [FE] 좌석 배치도 화면**
   - 등급별 색상이 표시되는 SVG/그리드 좌석 배치도
@@ -296,5 +310,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-04
-**📊 진행 상황**: Phase 5 완료, Phase 6 진행 예정 (20/34 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-07
+**📊 진행 상황**: Phase 6 진행 중 — Task 021 완료, Task 022 진행 예정 (21/34 Tasks 완료)

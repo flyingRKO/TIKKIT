@@ -180,22 +180,32 @@ erDiagram
 
 등급별 "수량"으로 관리하던 재고를 실제 좌석 단위로 전환한다. `venues`는 이미 V1에 있으므로, 이 단계는 순수하게 "좌석" 모델링만 다룬다. 3단계(expand → backfill → contract) 마이그레이션으로 진행해, 서비스 중단 없이 스키마를 바꾸는 과정 자체를 포트폴리오 소재로 남긴다.
 
+엔티티 패키지는 소유 애그리거트를 따라 쪼갠다(실제 생성은 Task 022): `Seat`는 공연장 마스터 데이터라 `domain/venue/`, `ScheduleSeat`는 `TicketGrade`와 생명주기가 같은 회차 단위 재고라 `domain/performance/`, `ReservationSeat`는 예약의 append-only 이력이라 `domain/reservation/`에 둔다. 세 테이블의 소유자가 각각 다르므로 `domain/seat/` 단일 패키지로 모으면 venue·performance·reservation 세 패키지를 모두 import하는 허브가 된다.
+
 | 테이블 | 주요 컬럼 | 제약/인덱스 |
 |---|---|---|
-| seats | id, venue_id FK, section varchar(10), row_label varchar(5), seat_number int, pos_x int, pos_y int | UNIQUE(venue_id, section, row_label, seat_number) |
-| schedule_seats | id, schedule_id FK, seat_id FK, ticket_grade_id FK, status varchar(10) (AVAILABLE/HELD/SOLD), reservation_id FK (nullable, 현재 홀더) | UNIQUE(schedule_id, seat_id); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); `fillfactor=90` 고려 |
-| reservation_seats | id, reservation_id FK, schedule_seat_id FK, price numeric(12,0) | UNIQUE(reservation_id, schedule_seat_id) — 취소된 예약도 이력으로 남기므로 schedule_seat_id 단독 UNIQUE는 두지 않음 |
+| seats | id, venue_id FK, section varchar(10), row_label varchar(5), seat_number int, pos_x int NOT NULL, pos_y int NOT NULL | UNIQUE(venue_id, section, row_label, seat_number); CHECK(seat_number >= 1) |
+| schedule_seats | id, schedule_id FK, seat_id FK, ticket_grade_id FK, status varchar(10) (AVAILABLE/HELD/SOLD), reservation_id FK (nullable, 현재 홀더) | UNIQUE(schedule_id, seat_id); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); CHECK(status=AVAILABLE ↔ reservation_id IS NULL); `fillfactor=90` |
+| reservation_seats | id, reservation_id FK, schedule_seat_id FK, price numeric(12,0) | UNIQUE(reservation_id, schedule_seat_id) — 취소된 예약도 이력으로 남기므로 schedule_seat_id 단독 UNIQUE는 두지 않음; CHECK(price >= 0) |
+
+`pos_x`/`pos_y`는 NOT NULL이다. V5 백필이 항상 계산하고, 좌석 배치도(Task 023)가 좌표 없는 좌석을 렌더링할 수 없다. 좌표가 없는 스탠딩석은 현재 PRD 범위 밖이다.
+
+`ck_schedule_seats_status_holder`(`AVAILABLE`이면 `reservation_id IS NULL`, `HELD`/`SOLD`면 NOT NULL)를 두는 이유: 아래 COMMENT의 "비어있으면 AVAILABLE"을 제약 없이 말로만 두면 "SOLD인데 점유자가 없는" 썩은 행이 생길 수 있다. 선점·해제 UPDATE가 두 컬럼을 항상 한 번에 같이 쓰므로 걸림돌이 되지 않는다. 단 Task 022에서 2단계 상태 전이(좌석 상태 먼저, 예약 연결 나중)가 필요해지면 다시 봐야 한다.
+
+복합 FK `fk_schedule_seats_ticket_grade_schedule`은 "등급과 회차가 어긋나지 않음"만 보장한다. **좌석의 공연장이 그 회차 공연의 공연장과 같은지는 DB가 보장하지 못한다** — `schedule_seats`에서 venue까지는 `schedules → performances → venues`로 3홉이고, 이걸 복합 FK로 표현하려면 `schedules`에 `venue_id`를 비정규화해야 한다. 좌석은 V5 백필과 관리 기능만 만들고 사용자 요청 경로에서는 INSERT되지 않아 어긋날 입구가 사실상 없으므로, 비정규화하지 않고 `SeatBackfillMigrationTest`의 단정으로 커버한다.
+
+**좌석 명명 규칙**: 국내 예매처 관행인 "**구역 / 열 / 번**"을 따른다. 열(`row_label`)은 알파벳이 아니라 **숫자**(`"1"`, `"2"`, ... `"23"`)를 쓰고, 좌석 번호는 **구역마다 1번부터 재시작**한다. (서구권은 `Row A`에서 혼동을 피해 `I`를 건너뛰는 알파벳 관행이지만 국내는 "3열 12번" 형태다. 숫자를 쓰면 백필 SQL에 알파벳 변환 분기도 필요 없다.) 구역(`section`)은 등급별로 **좌·중앙·우 3분할**한다 — 실제 공연장이 이 구조이고, `pos_x`에 통로 간격이 자연히 생겨 배치도가 제대로 나온다.
 
 **한국어 COMMENT (Task 021 `V4__create_seat_tables.sql`에 그대로 포함):**
 
 ```sql
 COMMENT ON TABLE seats IS '공연장의 물리적 좌석 배치 (venue 단위로 한 번만 정의, 회차와 무관)';
 COMMENT ON COLUMN seats.venue_id IS '소속 공연장 (venues 참조)';
-COMMENT ON COLUMN seats.section IS '구역 (예: A구역, VIP석)';
-COMMENT ON COLUMN seats.row_label IS '열 (예: A열, B열)';
-COMMENT ON COLUMN seats.seat_number IS '좌석 번호';
-COMMENT ON COLUMN seats.pos_x IS '좌석 배치도 상의 x 좌표 (UI 렌더링용)';
-COMMENT ON COLUMN seats.pos_y IS '좌석 배치도 상의 y 좌표 (UI 렌더링용)';
+COMMENT ON COLUMN seats.section IS '구역 (등급별 좌·중앙·우 블록, 예: VIP-중, R-좌)';
+COMMENT ON COLUMN seats.row_label IS '열 (무대에서 가까운 순서대로 1부터, 예: 1, 2, 23)';
+COMMENT ON COLUMN seats.seat_number IS '구역 내 좌석 번호 (구역마다 1번부터 시작)';
+COMMENT ON COLUMN seats.pos_x IS '좌석 배치도 상의 x 좌표 (UI 렌더링용, 블록 사이 통로만큼 비워둔다)';
+COMMENT ON COLUMN seats.pos_y IS '좌석 배치도 상의 y 좌표 (UI 렌더링용, 작을수록 무대에 가깝다)';
 
 COMMENT ON TABLE schedule_seats IS '회차별 좌석 재고 및 현재 상태 (seats를 회차마다 판매 단위로 인스턴스화)';
 COMMENT ON COLUMN schedule_seats.schedule_id IS '소속 회차 (schedules 참조)';
@@ -220,6 +230,8 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
   AND reservation_id = :r;
 ```
 
+`fillfactor = 90`은 그 "인덱스를 걸지 않는다"의 **전제 조건**이다. 인덱스가 없어도 페이지에 빈 공간이 없으면 Postgres는 새 튜플을 다른 페이지에 써야 하고, 그러면 HOT이 성립하지 않는다. `CREATE TABLE` 시점에만 깔끔하게 걸 수 있다 — 기존 테이블에 나중에 `ALTER TABLE ... SET (fillfactor = 90)`을 하면 이미 쓰인 페이지에는 적용되지 않아 `VACUUM FULL`이 필요하다. 그래서 V4에서 넣는다. 반대로 `seats`(INSERT만)와 `reservation_seats`(append-only)는 같은 행을 반복 UPDATE하지 않으므로 기본값 100을 쓴다. 10%를 비워두면 저장 공간만 낭비하고 읽을 페이지 수가 늘어난다.
+
 `EXPLAIN ANALYZE`로 실제 병목이 확인되면 그때 인덱스를 다시 추가한다.
 
 **등급 혼합 정책**: "한 예약 = 한 등급"을 Phase 6 이후에도 유지한다. `reservations.ticket_grade_id`/`unit_price`/`quantity`는 제거하지 않고 그대로 쓰며, 예매 API에 `seatIds`가 추가된다. 선택한 모든 좌석이 동일한 `ticket_grade_id`에 속하는지는 여러 테이블에 걸친 조건이라 DB CHECK로 표현할 수 없으므로, 서비스 레이어에서 애플리케이션 검증으로 강제한다(Task 022).
@@ -227,13 +239,16 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
 **마이그레이션 절차 (V4 expand → V5 backfill → V6 contract):**
 
 1. **V4 (expand)**: `seats`, `schedule_seats`, `reservation_seats` 테이블 생성. 기존 테이블은 그대로 유지해 무중단 배포 가능.
-2. **V5 (backfill)**:
+2. **V5 (backfill)**: `db/migration/`에 두어 dev·test·prod 전부에서 돈다. 세 statement 모두 멱등(`ON CONFLICT DO NOTHING` / `NOT EXISTS`)이고, `DO` 블록이나 `CREATE FUNCTION`을 쓰지 않는다 — 검증 테스트가 이 파일을 `ScriptUtils`로 `;` 기준으로 쪼개 재실행하기 때문에 달러 인용 본문이 있으면 statement 분리가 깨진다.
    - venue별로 `generate_series`를 이용해 좌석 그리드를 생성한다 (해당 venue가 가진 회차 중 등급별 `total_quantity` 최댓값 기준으로 크기 결정).
-   - `V5_1__seed_venue_layouts.sql`로 개발용 배치도 시드를 추가한다.
+   - 그리드 산정: 블록 3분할 비율은 좌 25% / 중앙 50% / 우 25%, 열당 좌석 수는 공연장 규모에 따라 `CASE WHEN 총좌석 <= 1000 THEN 20 ELSE 40 END`(소규모 5/10/5, 대규모 10/20/10), 행 수는 `CEIL(MAX(total_quantity) / 열당 좌석 수)`. `pos_x`는 블록 오프셋 + 좌석번호(블록 사이 통로 2칸), `pos_y`는 앞선 등급들의 행 수 누적합 + 행 번호로 VIP → R → S → A 순으로 무대에서 멀어진다. 등급-구역 매핑은 V5 안의 인라인 `VALUES`에 둔다 — 4등급 × 3블록뿐이고 `grade` CHECK로 고정돼 있어 별도 테이블을 만들면 V6 이후 아무도 안 쓰는 스키마가 남는다. (파일명이 `V5_1`이라 V5보다 **뒤에** 돌기 때문에 매핑을 테이블로 시드하는 방식은 순서상 불가능하다.)
    - 회차별로 등급-구역 매핑에 따라 schedule_seats를 생성하고, 등급당 앞쪽 `total_quantity`개 좌석에만 등급을 배정한다.
-   - 기존 CONFIRMED/PENDING 예약은 `ROW_NUMBER() OVER (PARTITION BY ticket_grade_id ORDER BY created_at)`로 좌석에 배정하고 상태를 SOLD/HELD로, reservation_seats 행도 생성한다.
-   - 검증: 등급별 `SOLD + HELD` 건수가 기존 `total_quantity - remaining_quantity`와 일치해야 한다 (Task 021 마이그레이션 검증 테스트).
-3. **V6 (contract)**: `ticket_grades`의 `total_quantity`/`remaining_quantity` 컬럼만 제거한다. `reservations` 스키마는 변경하지 않는다(한 예약=한 등급 정책 유지).
+   - 기존 CONFIRMED/PENDING 예약은 `ROW_NUMBER() OVER (PARTITION BY ticket_grade_id ORDER BY created_at)`로 좌석에 배정하고 상태를 SOLD/HELD로, reservation_seats 행도 생성한다. CANCELLED/EXPIRED는 재고를 이미 반납했으므로 좌석을 주지 않는다.
+   - 검증: 등급별 `SOLD + HELD` 건수가 기존 `total_quantity - remaining_quantity`와 일치해야 한다. `src/test/java/com/tikkit/api/migration/SeatBackfillMigrationTest`가 마이그레이션 전 모양의 픽스처를 넣고 `V5__backfill_seats.sql`을 클래스패스에서 읽어 **그대로 재실행**한 뒤 단정한다(테스트 프로필은 `db/seed`를 로드하지 않아 기동 시의 V5 실행에는 검증할 데이터가 없다). V4 제약이 실제로 막히는지는 `SeatSchemaConstraintTest`가 확인한다.
+   - `V5_1__seed_venue_layouts.sql`은 **`db/seed/`에 두어 dev 프로필에서만 로드**한다. V5가 만드는 건 "기존 재고를 담을 수 있는 최소 격자"이고, V5는 운영에서도 돌기 때문에 실제 공연장 배치를 날조할 수 없다. V5_1은 dev 전용이라 그 제약이 없어서 구역명을 사람이 읽는 형태(`VIP-중` → `VIP석 중앙`)로 바꾼다. `section`이 `varchar(10)`이라 가장 긴 `VIP석 좌측`(7자)까지만 쓸 수 있다.
+   - 이 순서에는 양방향 제약이 있다. `section`은 V5의 [2/3]이 `split_part(section, '-', 1)`로 등급을 되찾는 기준이라 **V5보다 먼저 바꾸면 `schedule_seats`가 하나도 생기지 않는다**. 반대로 V5_1이 구분자 `-`를 지우므로 **그 뒤에는 V5를 수동 재실행해도 [2/3]이 매칭되지 않는다** — 좌석을 다시 만들려면 DB를 비우고 V1부터 재생성한다. 파일명이 5.1이라 Flyway가 항상 V5 뒤에 돌려주므로 정상 경로에서는 안전하다.
+   - 애초 계획에는 V5_1에 HELD/SOLD 상태 샘플도 넣기로 했다. dev 시드에 예약이 0건이면 V5의 예약 배정이 아무것도 하지 않아 모든 좌석이 AVAILABLE이 되고 FE가 선점·판매 완료 렌더링을 확인할 수 없기 때문이다. 실제로는 예매 테스트로 쌓인 예약이 dev DB에 있어 V5가 좌석을 배정했으므로 생략했다. 빈 DB에서 처음 띄우면 상태 샘플이 없으니 화면에서 직접 예매해 HELD를 만든다.
+3. **V6 (contract)**: `ticket_grades`의 `total_quantity`/`remaining_quantity` 컬럼만 제거한다. `reservations` 스키마는 변경하지 않는다(한 예약=한 등급 정책 유지). 이 시점부터 좌석 수의 원천이 뒤집힌다 — 그전까지는 `total_quantity`(숫자)가 원천이고 좌석이 파생이지만, V6 이후에는 `seats`+`schedule_seats`가 원천이 된다. PRD "MVP 제외 범위"에 관리자 기능·콘텐츠 CRUD가 빠져 있어 새 공연장 좌석을 만드는 경로는 시드/수동 SQL뿐이므로, `V1_1`과 `V5_1`이 공연장 좌석 정의의 유일한 소스가 된다.
 
 **선점 쿼리 (다중 행 조건부 UPDATE):**
 
@@ -301,7 +316,8 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V3_1 | `ticket_grades.version` 컬럼 제거 (조건부 UPDATE 채택으로 미사용) | 019 |
 | V3_2 | 중복 선점 방지 부분 유니크 인덱스 추가 (reservations) | 020 |
 | V4 | 지정석 테이블 생성 (seats, schedule_seats, reservation_seats) | 021 |
-| V5 / V5_1 | 기존 데이터 좌석 배정 백필 / 개발용 배치도 시드 | 021 |
+| V5 | 기존 데이터 좌석 배정 백필 (db/migration, 전 환경) | 021 |
+| V5_1 | 개발용 배치도 시드 — 좌표 보정·구역명·상태 샘플 (db/seed, dev 전용) | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |
 | V7 | 조회 성능 개선을 위한 인덱스 추가 | 027 |
 | V8 | 대기열 활성화 플래그 (`schedules.queue_enabled`) | 030 |
