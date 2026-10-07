@@ -6,7 +6,9 @@
 
 ## 진행 상황
 
-**MVP 완성 (`v0.1.0-mvp`) — Phase 0~4 완료, 17/33 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고, 이 흐름은 Playwright E2E로 CI에서 검증합니다. 다음은 Phase 5(동시성 제어 고도화)입니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+**동시성 제어 완료 (`v0.2.0-concurrency`) — Phase 0~5 완료, 21/34 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고, 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
+
+현재 **Phase 6(지정석 전환)** 진행 중입니다. 등급별 "수량" 재고를 좌석 단위로 바꾸는 3단계(expand → backfill → contract) 마이그레이션인데, Task 021에서 expand·backfill까지 끝냈습니다 — 좌석 테이블 3개와 백필을 넣고 기존 예약을 좌석에 배정했으며, 애플리케이션 코드는 아직 좌석을 모르는 상태로 그대로 동작합니다. 다음은 Task 022(좌석 조회·선점 API 전환)입니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 스크린샷
 
