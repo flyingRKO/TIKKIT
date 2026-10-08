@@ -5,6 +5,7 @@ import type {
   PerformanceDetailResponse,
   PerformanceStatus,
   PerformanceSummaryResponse,
+  ScheduleSeatResponse,
   TicketGradeResponse,
 } from "@/types/api";
 
@@ -48,4 +49,10 @@ export function getPerformanceDetail(id: number | string): Promise<PerformanceDe
 
 export function getTicketGrades(scheduleId: number): Promise<TicketGradeResponse[]> {
   return apiFetch<TicketGradeResponse[]>(`/api/v1/schedules/${scheduleId}/ticket-grades`);
+}
+
+// 회차의 모든 좌석을 배치도 순서(앞열 → 왼쪽)로 받는다. 큰 공연장이면 수천 건이라 응답이 크다 —
+// 공연 상세에서 회차마다 미리 불러오면 안 되고, 좌석이 실제로 필요한 시점에만 호출한다.
+export function getScheduleSeats(scheduleId: number): Promise<ScheduleSeatResponse[]> {
+  return apiFetch<ScheduleSeatResponse[]>(`/api/v1/schedules/${scheduleId}/seats`);
 }

@@ -108,7 +108,27 @@ export interface TicketGradeResponse {
   id: number;
   grade: Grade;
   price: number;
+  // 지정석 전환 후 BE가 schedule_seats의 AVAILABLE 건수로 계산해 내려준다 (Task 022).
+  // 응답 형식은 그대로라 화면은 바뀌지 않았다.
   remainingQuantity: number;
+}
+
+// 좌석 (Task 022)
+
+export type SeatStatus = "AVAILABLE" | "HELD" | "SOLD";
+
+export interface ScheduleSeatResponse {
+  // schedule_seats.id다 — 물리 좌석(seats.id)이 아니다. 선점 요청의 seatIds가 이 값이다.
+  // 좌석은 공연장 단위로 공유되지만 선점은 회차 단위라서, 물리 좌석 id로는 어느 회차인지 알 수 없다.
+  id: number;
+  section: string;
+  rowLabel: string;
+  seatNumber: number;
+  // 배치도 좌표. posY가 작을수록 무대에 가깝고, posX는 구역 사이 통로만큼 값이 비어 있다.
+  posX: number;
+  posY: number;
+  status: SeatStatus;
+  ticketGradeId: number;
 }
 
 // 예매·결제 (Task 012~013에서 실제 로직 연결)
@@ -119,6 +139,9 @@ export interface ReservationCreateRequest {
   scheduleId: number;
   ticketGradeId: number;
   quantity: number;
+  // 고른 좌석의 schedule_seats.id 목록. quantity와 개수가 같아야 하고, 다르면 BE가 400으로 끊는다.
+  // "한 예약 = 한 등급" 정책이라 ticketGradeId/quantity도 그대로 보낸다 (Task 022).
+  seatIds: number[];
 }
 
 export interface ReservationResponse {
