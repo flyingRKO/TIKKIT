@@ -234,6 +234,10 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
 
 `EXPLAIN ANALYZE`로 실제 병목이 확인되면 그때 인덱스를 다시 추가한다.
 
+**Task 022 실측 결과 — 인덱스를 추가할 근거가 없었다.** dev 규모(`schedule_seats` 26,894행, 최대 회차 3,200석)에서 등급별 예매 가능 좌석 COUNT가 **0.82 ms**다. `UNIQUE(schedule_id, seat_id)`의 선두 컬럼이 `schedule_id`라서 Bitmap Index Scan으로 회차 범위가 좁혀지고 seq scan이 나지 않는다. 같은 조건에서 `schedule_seats`의 HOT 업데이트 비율은 **100%**(`n_tup_hot_upd` 6 / `n_tup_upd` 6)였다 — `fillfactor = 90`과 "인덱스를 걸지 않는다"가 둘 다 필요하다는 것도 같이 드러났다. 비교군인 `reservations`는 `status`를 갱신하는데 `idx_reservations_pending_expires_at`이 그 컬럼을 덮고 있어 HOT이 0%다.
+
+오히려 비싼 쪽은 좌석맵 조회(3,200석)로 **10.70 ms**였고, 원인은 `schedule_seats`가 아니라 `seats` 전체 Seq Scan(7,120행)과 3,200행 정렬이다. 그래서 V7(Task 027)에서 볼 것은 `idx(schedule_id, status)`가 아니라 좌석맵의 조인·정렬 전략이다. 측정 상세는 `docs/improvements/004-seatmap-migration.md` 8절에 있다.
+
 **등급 혼합 정책**: "한 예약 = 한 등급"을 Phase 6 이후에도 유지한다. `reservations.ticket_grade_id`/`unit_price`/`quantity`는 제거하지 않고 그대로 쓰며, 예매 API에 `seatIds`가 추가된다. 선택한 모든 좌석이 동일한 `ticket_grade_id`에 속하는지는 여러 테이블에 걸친 조건이라 DB CHECK로 표현할 수 없으므로, 서비스 레이어에서 애플리케이션 검증으로 강제한다(Task 022).
 
 **마이그레이션 절차 (V4 expand → V5 backfill → V6 contract):**
@@ -248,18 +252,33 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
    - `V5_1__seed_venue_layouts.sql`은 **`db/seed/`에 두어 dev 프로필에서만 로드**한다. V5가 만드는 건 "기존 재고를 담을 수 있는 최소 격자"이고, V5는 운영에서도 돌기 때문에 실제 공연장 배치를 날조할 수 없다. V5_1은 dev 전용이라 그 제약이 없어서 구역명을 사람이 읽는 형태(`VIP-중` → `VIP석 중앙`)로 바꾼다. `section`이 `varchar(10)`이라 가장 긴 `VIP석 좌측`(7자)까지만 쓸 수 있다.
    - 이 순서에는 양방향 제약이 있다. `section`은 V5의 [2/3]이 `split_part(section, '-', 1)`로 등급을 되찾는 기준이라 **V5보다 먼저 바꾸면 `schedule_seats`가 하나도 생기지 않는다**. 반대로 V5_1이 구분자 `-`를 지우므로 **그 뒤에는 V5를 수동 재실행해도 [2/3]이 매칭되지 않는다** — 좌석을 다시 만들려면 DB를 비우고 V1부터 재생성한다. 파일명이 5.1이라 Flyway가 항상 V5 뒤에 돌려주므로 정상 경로에서는 안전하다.
    - 애초 계획에는 V5_1에 HELD/SOLD 상태 샘플도 넣기로 했다. dev 시드에 예약이 0건이면 V5의 예약 배정이 아무것도 하지 않아 모든 좌석이 AVAILABLE이 되고 FE가 선점·판매 완료 렌더링을 확인할 수 없기 때문이다. 실제로는 예매 테스트로 쌓인 예약이 dev DB에 있어 V5가 좌석을 배정했으므로 생략했다. 빈 DB에서 처음 띄우면 상태 샘플이 없으니 화면에서 직접 예매해 HELD를 만든다.
-3. **V6 (contract)**: `ticket_grades`의 `total_quantity`/`remaining_quantity` 컬럼만 제거한다. `reservations` 스키마는 변경하지 않는다(한 예약=한 등급 정책 유지). 이 시점부터 좌석 수의 원천이 뒤집힌다 — 그전까지는 `total_quantity`(숫자)가 원천이고 좌석이 파생이지만, V6 이후에는 `seats`+`schedule_seats`가 원천이 된다. PRD "MVP 제외 범위"에 관리자 기능·콘텐츠 CRUD가 빠져 있어 새 공연장 좌석을 만드는 경로는 시드/수동 SQL뿐이므로, `V1_1`과 `V5_1`이 공연장 좌석 정의의 유일한 소스가 된다.
+3. **V6 (contract)**: `ticket_grades`의 `total_quantity`/`remaining_quantity` 컬럼만 제거한다. `reservations` 스키마는 변경하지 않는다(한 예약=한 등급 정책 유지). 이 시점부터 좌석 수의 원천이 뒤집힌다 — 그전까지는 `total_quantity`(숫자)가 원천이고 좌석이 파생이지만, V6 이후에는 `seats`+`schedule_seats`가 원천이 된다. PRD "MVP 제외 범위"에 관리자 기능·콘텐츠 CRUD가 빠져 있어 새 공연장 좌석을 만드는 경로는 시드/수동 SQL뿐이므로, `V1_1`·`V4_1`·`V5_1`이 공연장 좌석 정의의 유일한 소스가 된다.
+   - **expand와 달리 contract는 코드와 같은 배포에 묶인다.** `ddl-auto: validate`라서 컬럼만 지우면 Hibernate가 매핑 불일치로 기동을 거부한다(`Schema-validation: missing column [total_quantity]`). 그래서 V6와 `TicketGrade`의 필드 제거가 한 커밋에 들어간다. V4(expand)는 반대로 애플리케이션이 테이블을 전혀 모르는 상태에서 먼저 적용할 수 있었다 — 두 단계의 제약은 대칭이 아니다.
+   - `ck_ticket_grades_remaining_range`는 두 컬럼을 모두 참조하므로 `DROP COLUMN`에 딸려 자동으로 사라진다(별도 `DROP CONSTRAINT` 불필요, 롤백되는 트랜잭션에서 확인). 복합 FK가 의존하는 `uk_ticket_grades_id_schedule`은 남는다.
+   - **FE 계약은 바뀌지 않는다.** `TicketGradeResponse.remainingQuantity`를 `schedule_seats`의 AVAILABLE 건수로 계산해 내려주므로 응답 형식이 그대로다. 등급 목록과 좌석 COUNT를 각각 조회해 서비스에서 합친다 — 한 쿼리로 `LEFT JOIN` + `GROUP BY` 집계를 하면 QueryDSL이 `count(...) FILTER (...)`를 표현할 수 없고, 좌석이 없는 등급의 집계가 `null`이 되어 FE의 매진 판정(`remainingQuantity === 0`)이 빗나간다.
+   - 이 방식이 이중 쓰기(dual write)보다 나은 이유: 두 재고를 같이 갱신하면 `ticket_grades` 한 행 경쟁이 그대로 남아 좌석으로 쪼갠 효과가 상쇄된다. 파생 COUNT를 쓰면 컬럼이 즉시 미사용이 되고 V6는 "이미 아무도 안 읽는 컬럼 정리"가 된다.
 
-**선점 쿼리 (다중 행 조건부 UPDATE):**
+**선점 쿼리 (다중 행 조건부 UPDATE + 이력 INSERT, Task 022에서 구현):**
 
 ```sql
-UPDATE schedule_seats
-SET status = 'HELD', reservation_id = :reservationId
-WHERE id IN (:sortedSeatIds) AND status = 'AVAILABLE';
--- 적용된 행 수가 요청한 좌석 수와 다르면 롤백 후 409 반환
+WITH held AS (
+    UPDATE schedule_seats
+    SET status = 'HELD', reservation_id = :reservationId, updated_at = :now
+    WHERE id IN (:sortedSeatIds)
+      AND status = 'AVAILABLE'
+      AND ticket_grade_id = :ticketGradeId
+    RETURNING id
+)
+INSERT INTO reservation_seats (reservation_id, schedule_seat_id, price, created_at, updated_at)
+SELECT :reservationId, id, :price, :now, :now FROM held;
+-- 반환값(INSERT 행 수)이 요청한 좌석 수와 다르면 예외로 롤백 후 409 SOLD_OUT
 ```
 
-좌석 ID를 정렬해서 `IN` 절에 넣어 여러 사용자가 겹치는 좌석 집합을 동시에 선점할 때 데드락을 방지한다.
+좌석 상태 변경과 이력 INSERT를 데이터 변경 CTE 한 문장으로 묶어서, 둘 중 하나만 성공하는 상태가 생길 수 없다. `held`를 한 번만 참조하므로 `AS MATERIALIZED`가 필요 없다(참조가 늘면 명시해야 한다). `ticket_grade_id`를 WHERE에 다시 넣은 건 등급 검증 조회와 이 UPDATE 사이에 무엇이 바뀌어도 등급 밖 좌석을 잡지 않게 하는 방어다.
+
+좌석 ID를 정렬해서 넣는 이유는 여러 사용자가 겹치는 좌석 집합을 동시에 선점할 때 락 획득 순서를 하나로 고정해 데드락을 막는 것이다. 다만 **PostgreSQL은 `IN` 절 리터럴 순서가 아니라 플래너가 고른 스캔 순서로 락을 잡는다.** 실측에서는 PK Index Scan(`Index Cond: id = ANY ('{...}'::bigint[])`)이 선택됐고, btree의 `ScalarArrayOpExpr` 스캔은 배열 값을 정렬해 인덱스 순서로 훑으므로 결과적으로 ID 오름차순이 된다. 애플리케이션 정렬은 그 플래너 선택에 기대지 않기 위한 방어이며 비용이 없다. 측정과 데드락 실측은 `docs/improvements/004-seatmap-migration.md` 4절에 있다.
+
+**예약 INSERT가 좌석 선점보다 먼저 와야 한다.** `ck_schedule_seats_status_holder`가 HELD 좌석에 `reservation_id`를 요구하고 그 컬럼이 `reservations` FK이므로, 예약 행이 없으면 좌석을 잡을 수 없다. 전환 전에는 재고 차감이 먼저였는데 순서가 뒤집혔다.
 
 ```mermaid
 erDiagram
@@ -316,8 +335,9 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V3_1 | `ticket_grades.version` 컬럼 제거 (조건부 UPDATE 채택으로 미사용) | 019 |
 | V3_2 | 중복 선점 방지 부분 유니크 인덱스 추가 (reservations) | 020 |
 | V4 | 지정석 테이블 생성 (seats, schedule_seats, reservation_seats) | 021 |
+| V4_1 | dev 시드 등급 수량을 공연장별로 조정 (db/seed, dev 전용) | 021 |
 | V5 | 기존 데이터 좌석 배정 백필 (db/migration, 전 환경) | 021 |
 | V5_1 | 개발용 배치도 시드 — 좌표 보정·구역명·상태 샘플 (db/seed, dev 전용) | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |
 | V7 | 조회 성능 개선을 위한 인덱스 추가 | 027 |
-| V8 | 대기열 활성화 플래그 (`schedules.queue_enabled`) | 030 |
+| V8 | 대기열 활성화 플래그 (`schedules.queue_enabled`) | 031 |

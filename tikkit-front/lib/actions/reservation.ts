@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
+import { getScheduleSeats } from "@/lib/api/performances";
 import {
   cancelReservation,
   createReservation,
@@ -67,6 +68,29 @@ async function findPendingReservationId(
   return matched?.id ?? null;
 }
 
+// 등급에서 예매 가능한 좌석을 앞자리부터 quantity개 골라준다. 좌석이 모자라면 null.
+//
+// ⚠️ 한시적 코드다. Task 023에서 좌석 배치도가 생기면 사용자가 고른 seatIds를 폼으로 받게 되고,
+//    이 함수는 사라진다. 지금은 선택 UI가 없는데 BE는 seatIds를 필수로 받으므로 서버가 대신 고른다.
+//    컴포넌트(ticket-selector.tsx)를 손대지 않으려고 Server Action 안에 둔 것이다.
+//
+// BE 응답이 이미 배치도 순서(앞열 → 왼쪽)로 정렬돼 있어서 slice만 하면 앞자리가 잡힌다.
+// 좌석을 고른 뒤 선점 요청 사이에 다른 사람이 그 자리를 가져갈 수 있는데, 그건 BE가 SOLD_OUT으로
+// 끊어준다 — 여기서 막을 수 있는 경쟁이 아니다.
+async function pickAvailableSeatIds(
+  scheduleId: number,
+  ticketGradeId: number,
+  quantity: number
+): Promise<number[] | null> {
+  const seats = await getScheduleSeats(scheduleId);
+  const picked = seats
+    .filter((seat) => seat.ticketGradeId === ticketGradeId && seat.status === "AVAILABLE")
+    .slice(0, quantity)
+    .map((seat) => seat.id);
+
+  return picked.length === quantity ? picked : null;
+}
+
 export async function createReservationAction(
   _prevState: ReservationActionState,
   formData: FormData
@@ -94,7 +118,14 @@ export async function createReservationAction(
   let redirectTo: string;
 
   try {
-    const reservation = await createReservation({ scheduleId, ticketGradeId, quantity });
+    const seatIds = await pickAvailableSeatIds(scheduleId, ticketGradeId, quantity);
+    if (seatIds === null) {
+      // 화면에 남아 있는 잔여석 숫자가 오래된 값이다. 다시 가져오게 한다.
+      revalidatePath(`/performances/${performanceId}`);
+      return { error: CREATE_ERROR_MESSAGES.SOLD_OUT };
+    }
+
+    const reservation = await createReservation({ scheduleId, ticketGradeId, quantity, seatIds });
     redirectTo = `/booking/${reservation.id}`;
   } catch (error) {
     if (error instanceof ApiError) {

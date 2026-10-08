@@ -1,6 +1,7 @@
 package com.tikkit.api.domain.performance.controller;
 
 import com.tikkit.api.common.response.ApiResponse;
+import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeResponse;
 import com.tikkit.api.domain.performance.service.ScheduleService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -13,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-@Tag(name = "Schedule", description = "회차별 등급·잔여 수량 조회")
+@Tag(name = "Schedule", description = "회차별 등급·잔여 수량·좌석 조회")
 @RestController
 @RequestMapping("/api/v1/schedules")
 @RequiredArgsConstructor
@@ -25,5 +26,11 @@ public class ScheduleController {
     @GetMapping("/{id}/ticket-grades")
     public ApiResponse<List<TicketGradeResponse>> ticketGrades(@PathVariable Long id) {
         return ApiResponse.success(scheduleService.getTicketGrades(id));
+    }
+
+    @Operation(summary = "회차 좌석 배치도 조회")
+    @GetMapping("/{id}/seats")
+    public ApiResponse<List<ScheduleSeatResponse>> seats(@PathVariable Long id) {
+        return ApiResponse.success(scheduleService.getSeats(id));
     }
 }

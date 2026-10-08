@@ -26,8 +26,8 @@ public class ReservationExpiryScheduler {
     public void run() {
         Instant now = Instant.now();
 
-        int expiredGrades = reservationRepository.expirePendingReservations(now);
-        log.info("선점 만료 배치 실행 — 잔여 수량이 복원된 등급 수: {}", expiredGrades);
+        int releasedSeats = reservationRepository.expirePendingReservations(now);
+        log.info("선점 만료 배치 실행 — 반환된 좌석 수: {}", releasedSeats);
 
         int recalculatedPerformances = performanceRepository.recalculateDerivedFields(now);
         log.info("공연 판매 상태 재계산 배치 실행 — 값이 바뀐 공연 수: {}", recalculatedPerformances);

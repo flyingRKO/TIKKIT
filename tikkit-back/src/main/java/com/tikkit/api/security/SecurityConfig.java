@@ -40,8 +40,12 @@ public class SecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/auth/**").permitAll()
+                        // 좌석 배치도도 등급·잔여 수량과 같이 로그인 없이 볼 수 있어야 한다 —
+                        // "어떤 자리가 남았는지" 확인하고 나서 가입하는 흐름이 정상이다 (Task 022).
                         .requestMatchers(HttpMethod.GET,
-                                "/api/v1/performances/**", "/api/v1/schedules/*/ticket-grades").permitAll()
+                                "/api/v1/performances/**",
+                                "/api/v1/schedules/*/ticket-grades",
+                                "/api/v1/schedules/*/seats").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling

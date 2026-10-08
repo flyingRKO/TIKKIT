@@ -1,6 +1,6 @@
 package com.tikkit.api.domain.performance.repository;
 
-import com.tikkit.api.domain.performance.dto.TicketGradeResponse;
+import com.tikkit.api.domain.performance.dto.TicketGradeRow;
 import com.tikkit.api.domain.performance.entity.Grade;
 import com.tikkit.api.domain.performance.entity.Performance;
 import com.tikkit.api.domain.performance.entity.PerformanceCategory;
@@ -10,8 +10,6 @@ import com.tikkit.api.domain.performance.entity.TicketGrade;
 import com.tikkit.api.domain.venue.entity.Venue;
 import com.tikkit.api.domain.venue.repository.VenueRepository;
 import com.tikkit.api.support.AbstractContainerTest;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,9 +35,6 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
     @Autowired
     private TicketGradeRepository ticketGradeRepository;
 
-    @PersistenceContext
-    private EntityManager em;
-
     private Schedule schedule;
 
     @BeforeEach
@@ -60,10 +55,10 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
         ticketGradeRepository.save(ticketGrade(schedule, Grade.R, "99000", 80));
 
         // when
-        List<TicketGradeResponse> result = ticketGradeRepository.findResponsesByScheduleId(schedule.getId());
+        List<TicketGradeRow> result = ticketGradeRepository.findRowsByScheduleId(schedule.getId());
 
         // then
-        assertThat(result).extracting(TicketGradeResponse::grade)
+        assertThat(result).extracting(TicketGradeRow::grade)
                 .containsExactly(Grade.VIP, Grade.R, Grade.S);
     }
 
@@ -76,91 +71,10 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
         ticketGradeRepository.save(ticketGrade(otherSchedule, Grade.R, "99000", 80));
 
         // when
-        List<TicketGradeResponse> result = ticketGradeRepository.findResponsesByScheduleId(schedule.getId());
+        List<TicketGradeRow> result = ticketGradeRepository.findRowsByScheduleId(schedule.getId());
 
         // then
-        assertThat(result).extracting(TicketGradeResponse::grade).containsExactly(Grade.VIP);
-    }
-
-    // ----- 조건부 UPDATE (Task 019) -----
-    // 재고 차감·복원은 엔티티 메서드가 아니라 조건부 UPDATE가 담당하므로, 영향받은 행 수와 실제 DB 값으로 검증한다.
-    // 벌크 UPDATE는 1차 캐시를 갱신하지 않아서 findById로는 바뀐 값을 볼 수 없다 — 스칼라 조회로 읽는다.
-
-    @Test
-    @DisplayName("재고가 충분하면 1행이 차감되고 잔여 수량이 줄어든다")
-    void 조건부_차감_성공() {
-        // given
-        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.VIP, "150000", 10));
-
-        // when
-        int updated = ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 3, Instant.now());
-
-        // then
-        assertThat(updated).isEqualTo(1);
-        assertThat(remainingOf(grade.getId())).isEqualTo(7);
-    }
-
-    @Test
-    @DisplayName("요청 수량이 잔여 수량과 같으면 0까지 차감된다")
-    void 조건부_차감_경계() {
-        // given
-        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.R, "99000", 4));
-
-        // when
-        int updated = ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 4, Instant.now());
-
-        // then
-        assertThat(updated).isEqualTo(1);
-        assertThat(remainingOf(grade.getId())).isZero();
-    }
-
-    @Test
-    @DisplayName("잔여 수량보다 많이 요청하면 0행이고 잔여 수량은 그대로다")
-    void 조건부_차감_재고부족() {
-        // given
-        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.S, "77000", 2));
-
-        // when
-        int updated = ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 3, Instant.now());
-
-        // then
-        assertThat(updated).isZero();
-        assertThat(remainingOf(grade.getId())).isEqualTo(2);
-    }
-
-    @Test
-    @DisplayName("복원은 총 수량을 넘지 않을 때만 1행이다")
-    void 조건부_복원() {
-        // given
-        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.A, "55000", 5));
-        ticketGradeRepository.decreaseRemainingQuantity(grade.getId(), 2, Instant.now());
-
-        // when
-        int restored = ticketGradeRepository.increaseRemainingQuantity(grade.getId(), 2, Instant.now());
-
-        // then
-        assertThat(restored).isEqualTo(1);
-        assertThat(remainingOf(grade.getId())).isEqualTo(5);
-    }
-
-    @Test
-    @DisplayName("총 수량을 넘기는 복원은 0행이다 — CHECK 위반(500) 대신 영향 행 수로 드러난다")
-    void 조건부_복원_상한초과() {
-        // given: 차감 없이 가득 찬 상태
-        TicketGrade grade = ticketGradeRepository.save(ticketGrade(schedule, Grade.VIP, "150000", 5));
-
-        // when
-        int restored = ticketGradeRepository.increaseRemainingQuantity(grade.getId(), 1, Instant.now());
-
-        // then
-        assertThat(restored).isZero();
-        assertThat(remainingOf(grade.getId())).isEqualTo(5);
-    }
-
-    private int remainingOf(Long ticketGradeId) {
-        return em.createQuery("select tg.remainingQuantity from TicketGrade tg where tg.id = :id", Integer.class)
-                .setParameter("id", ticketGradeId)
-                .getSingleResult();
+        assertThat(result).extracting(TicketGradeRow::grade).containsExactly(Grade.VIP);
     }
 
     private Schedule schedule(Performance performance, int daysFromNow) {
@@ -178,8 +92,6 @@ class TicketGradeRepositoryTest extends AbstractContainerTest {
                 .schedule(schedule)
                 .grade(grade)
                 .price(new BigDecimal(price))
-                .totalQuantity(quantity)
-                .remainingQuantity(quantity)
                 .build();
     }
 }

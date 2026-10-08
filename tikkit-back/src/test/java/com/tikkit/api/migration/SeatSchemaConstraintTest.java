@@ -194,8 +194,8 @@ class SeatSchemaConstraintTest extends AbstractContainerTest {
 
     private Long insertGrade(Long targetScheduleId) {
         return insert("""
-                INSERT INTO ticket_grades (schedule_id, grade, price, total_quantity, remaining_quantity)
-                VALUES (?, 'VIP', 150000, 30, 30) RETURNING id
+                INSERT INTO ticket_grades (schedule_id, grade, price)
+                VALUES (?, 'VIP', 150000) RETURNING id
                 """, targetScheduleId);
     }
 

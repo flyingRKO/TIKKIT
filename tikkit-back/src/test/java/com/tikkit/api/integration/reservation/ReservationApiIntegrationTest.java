@@ -14,16 +14,21 @@ import com.tikkit.api.domain.performance.entity.Performance;
 import com.tikkit.api.domain.performance.entity.PerformanceCategory;
 import com.tikkit.api.domain.performance.entity.PerformanceStatus;
 import com.tikkit.api.domain.performance.entity.Schedule;
+import com.tikkit.api.domain.performance.entity.ScheduleSeat;
+import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
 import com.tikkit.api.domain.performance.repository.PerformanceRepository;
 import com.tikkit.api.domain.performance.repository.ScheduleRepository;
+import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import com.tikkit.api.domain.performance.repository.TicketGradeRepository;
 import com.tikkit.api.domain.reservation.dto.PaymentRequest;
 import com.tikkit.api.domain.reservation.dto.ReservationCreateRequest;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
+import com.tikkit.api.domain.venue.entity.Seat;
 import com.tikkit.api.domain.venue.entity.Venue;
+import com.tikkit.api.domain.venue.repository.SeatRepository;
 import com.tikkit.api.domain.venue.repository.VenueRepository;
 import com.tikkit.api.support.AbstractContainerTest;
 import jakarta.persistence.EntityManager;
@@ -42,6 +47,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
@@ -75,6 +83,10 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     @Autowired
     private TicketGradeRepository ticketGradeRepository;
     @Autowired
+    private SeatRepository seatRepository;
+    @Autowired
+    private ScheduleSeatRepository scheduleSeatRepository;
+    @Autowired
     private MemberRepository memberRepository;
     @Autowired
     private ReservationRepository reservationRepository;
@@ -87,12 +99,26 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     @PersistenceContext
     private EntityManager em;
 
+    /**
+     * 판매 중 회차에 미리 깔아두는 좌석 수.
+     * <p>
+     * 한 테스트 안에서 여러 회원이 각자 다른 좌석을 선점하므로 넉넉하게 둔다.
+     * 등급의 수량 컬럼은 더 이상 재고가 아니라, 이 좌석들의 AVAILABLE 건수가 재고다 (Task 022).
+     */
+    private static final int ON_SALE_SEAT_COUNT = 5;
+
+    private Venue venue;
     private Schedule onSaleSchedule;
     private TicketGrade onSaleGrade;
+    private List<Long> onSaleSeatIds;
+
+    /** 좌석을 테스트 안에서 겹치지 않게 나눠 주기 위한 커서. */
+    private final AtomicInteger seatCursor = new AtomicInteger();
 
     @BeforeEach
     void setUp() {
-        Venue venue = venueRepository.save(Venue.builder().name("테스트 공연장").address("서울").build());
+        seatCursor.set(0);
+        venue = venueRepository.save(Venue.builder().name("테스트 공연장").address("서울").build());
         Performance performance = performanceRepository.save(Performance.builder()
                 .title("테스트 공연")
                 .category(PerformanceCategory.CONCERT)
@@ -111,18 +137,17 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .schedule(onSaleSchedule)
                 .grade(Grade.VIP)
                 .price(new BigDecimal("150000"))
-                .totalQuantity(10)
-                .remainingQuantity(3)
                 .build());
+        onSaleSeatIds = createAvailableSeats(onSaleSchedule, onSaleGrade, "VIP-중", ON_SALE_SEAT_COUNT);
     }
 
     @Test
-    @DisplayName("예매 가능 기간에 로그인 후 선점하면 201과 PENDING 예약을 받고, 잔여 수량이 차감된다")
+    @DisplayName("예매 가능 기간에 로그인 후 좌석을 선점하면 201과 PENDING 예약을 받고, 그 좌석이 예매 가능 목록에서 빠진다")
     void 선점_성공() throws Exception {
         // given
         MockHttpSession session = loginAsNewMember("booker1@tikkit.com");
         ReservationCreateRequest request =
-                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 2);
+                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 2, nextSeats(2));
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations")
@@ -134,7 +159,9 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .andExpect(jsonPath("$.data.reservationNo").value(matchesPattern("^TK\\d{6}-\\d{6}$")))
                 .andExpect(jsonPath("$.data.expiresAt").isNotEmpty());
 
-        assertThat(remainingOf(onSaleGrade.getId())).isEqualTo(1);
+        assertThat(availableSeatCount(onSaleGrade.getId()))
+                .as("좌석 %d석 중 2석을 선점했다".formatted(ON_SALE_SEAT_COUNT))
+                .isEqualTo(ON_SALE_SEAT_COUNT - 2);
     }
 
     @Test
@@ -143,20 +170,24 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         // given
         MockHttpSession session1 = loginAsNewMember("booker2@tikkit.com");
         MockHttpSession session2 = loginAsNewMember("booker2b@tikkit.com");
-        ReservationCreateRequest request =
-                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        // 두 요청이 같은 좌석을 고르면 두 번째가 SOLD_OUT으로 떨어진다 — 여기서 보려는 건 채번이므로
+        // 좌석을 따로 집어 준다.
+        ReservationCreateRequest firstRequest =
+                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1, nextSeats(1));
+        ReservationCreateRequest secondRequest =
+                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1, nextSeats(1));
 
         // when
         MvcResult first = mockMvc.perform(post("/api/v1/reservations")
                         .session(session1)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(firstRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
         MvcResult second = mockMvc.perform(post("/api/v1/reservations")
                         .session(session2)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(secondRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
 
@@ -170,7 +201,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     @DisplayName("로그인하지 않고 선점을 요청하면 401을 반환한다")
     void 미로그인_선점_실패() throws Exception {
         ReservationCreateRequest request =
-                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1, nextSeats(1));
 
         mockMvc.perform(post("/api/v1/reservations")
                         .contentType(APPLICATION_JSON)
@@ -184,7 +215,9 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     void 수량_초과_요청() throws Exception {
         MockHttpSession session = loginAsNewMember("booker3@tikkit.com");
         ReservationCreateRequest request =
-                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 5);
+                // 좌석 ID는 아무 값이어도 된다 — DB를 보기 전에 @Size(max = 4)가 먼저 걸린다
+                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 5,
+                        List.of(1L, 2L, 3L, 4L, 5L));
 
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
@@ -199,7 +232,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     void 중복_선점_실패() throws Exception {
         MockHttpSession session = loginAsNewMember("booker5@tikkit.com");
         ReservationCreateRequest request =
-                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 1, nextSeats(1));
 
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
@@ -216,11 +249,20 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     }
 
     @Test
-    @DisplayName("잔여 수량보다 많이 요청하면 409 SOLD_OUT을 반환한다")
-    void 재고_부족_선점_실패() throws Exception {
-        MockHttpSession session = loginAsNewMember("booker4@tikkit.com");
-        ReservationCreateRequest request =
-                new ReservationCreateRequest(onSaleSchedule.getId(), onSaleGrade.getId(), 4);
+    @DisplayName("다른 회원이 이미 선점한 좌석을 고르면 409 SOLD_OUT을 반환한다")
+    void 선점된_좌석_선점_실패() throws Exception {
+        // given: 앞선 회원이 1번 좌석을 잡아둔다
+        // 전환 전에는 "잔여 수량보다 많이 요청"이 SOLD_OUT의 조건이었다. 좌석 단위에서는 수량이 아니라
+        // "고른 자리를 누가 먼저 잡았는가"가 조건이 된다. 없는 좌석을 고르면 SOLD_OUT이 아니라 404다.
+        List<Long> contested = onSaleSeatIds.subList(0, 1);
+        reserveViaApi(loginAsNewMember("booker4a@tikkit.com"),
+                onSaleSchedule.getId(), onSaleGrade.getId(), contested);
+        clearPersistenceContext();
+
+        // when & then: 뒤에 온 회원이 같은 좌석을 고른다
+        MockHttpSession session = loginAsNewMember("booker4b@tikkit.com");
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                onSaleSchedule.getId(), onSaleGrade.getId(), 1, contested);
 
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
@@ -231,11 +273,95 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     }
 
     @Test
+    @DisplayName("선점한 좌석이 DB가 보장하지 못하는 불변식을 모두 지킨다")
+    void 좌석_불변식() throws Exception {
+        // given: 두 회원이 서로 다른 좌석을 선점한다
+        // 아래 네 가지는 테이블 제약으로 표현할 수 없어서 테스트가 지켜야 한다.
+        // V5 백필 검증(SeatBackfillMigrationTest)이 보던 불변식인데, V6로 백필 재실행이 불가능해지면서
+        // 이제는 선점 경로가 계속 지켜야 하는 조건이 됐다 (Task 022).
+        reserveViaApi(loginAsNewMember("invariant1@tikkit.com"),
+                onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(2));
+        reserveViaApi(loginAsNewMember("invariant2@tikkit.com"),
+                onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
+        clearPersistenceContext();
+
+        // then: 좌석의 공연장이 회차 공연의 공연장과 같다
+        // schedule_seats → venue는 3홉이라 복합 FK로 표현할 수 없다
+        assertThat(countOf("""
+                SELECT count(*) FROM schedule_seats ss
+                         JOIN seats st ON st.id = ss.seat_id
+                         JOIN schedules sc ON sc.id = ss.schedule_id
+                         JOIN performances p ON p.id = sc.performance_id
+                WHERE ss.schedule_id = ? AND st.venue_id <> p.venue_id
+                """, onSaleSchedule.getId()))
+                .as("좌석의 공연장이 회차의 공연장과 어긋난 행").isZero();
+
+        // 한 좌석을 활성 예약 둘이 함께 점유하지 않는다
+        // reservation_seats는 append-only라 과거 예약의 행이 남으므로 활성 상태로만 좁혀서 센다
+        assertThat(countOf("""
+                SELECT count(*) FROM (
+                    SELECT rs.schedule_seat_id
+                    FROM reservation_seats rs JOIN reservations r ON r.id = rs.reservation_id
+                    WHERE r.schedule_id = ? AND r.status IN ('CONFIRMED', 'PENDING')
+                    GROUP BY rs.schedule_seat_id HAVING count(*) > 1
+                ) duplicated
+                """, onSaleSchedule.getId()))
+                .as("활성 예약 둘이 함께 점유한 좌석").isZero();
+
+        // 예약마다 받은 좌석 수가 매수와 같다 (부분 선점이 남지 않았다)
+        assertThat(countOf("""
+                SELECT count(*) FROM reservations r
+                WHERE r.schedule_id = ? AND r.status IN ('CONFIRMED', 'PENDING')
+                  AND (SELECT count(*) FROM reservation_seats rs WHERE rs.reservation_id = r.id)
+                      <> r.quantity
+                """, onSaleSchedule.getId()))
+                .as("좌석 수와 매수가 어긋난 예약").isZero();
+
+        // 좌석 가격의 합이 결제 금액과 같다
+        assertThat(countOf("""
+                SELECT count(*) FROM reservations r
+                WHERE r.schedule_id = ?
+                  AND EXISTS (SELECT 1 FROM reservation_seats rs WHERE rs.reservation_id = r.id)
+                  AND r.total_amount <> (SELECT sum(rs.price) FROM reservation_seats rs
+                                         WHERE rs.reservation_id = r.id)
+                """, onSaleSchedule.getId()))
+                .as("좌석 가격 합이 결제 금액과 어긋난 예약").isZero();
+
+        // 한 예약의 좌석은 모두 같은 등급이다 ("한 예약 = 한 등급" 정책)
+        assertThat(countOf("""
+                SELECT count(*) FROM (
+                    SELECT rs.reservation_id
+                    FROM reservation_seats rs
+                             JOIN schedule_seats ss ON ss.id = rs.schedule_seat_id
+                             JOIN reservations r ON r.id = rs.reservation_id
+                    WHERE r.schedule_id = ?
+                    GROUP BY rs.reservation_id HAVING count(DISTINCT ss.ticket_grade_id) > 1
+                ) mixed
+                """, onSaleSchedule.getId()))
+                .as("등급이 섞인 예약").isZero();
+    }
+
+    @Test
+    @DisplayName("이 회차·등급에 없는 좌석을 고르면 404 NOT_FOUND를 반환한다")
+    void 없는_좌석_선점_실패() throws Exception {
+        MockHttpSession session = loginAsNewMember("booker6@tikkit.com");
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                onSaleSchedule.getId(), onSaleGrade.getId(), 1, List.of(999_999L));
+
+        mockMvc.perform(post("/api/v1/reservations")
+                        .session(session)
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
     @DisplayName("PENDING 예약을 결제하면 200과 CONFIRMED를 받고, 결제 내역이 PAID 상태로 생성된다")
     void 결제_성공() throws Exception {
         // given
         MockHttpSession session = loginAsNewMember("payer1@tikkit.com");
-        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
@@ -279,7 +405,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     void 결제_실패_이미_확정된_예약() throws Exception {
         // given
         MockHttpSession session = loginAsNewMember("payer3@tikkit.com");
-        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
@@ -296,35 +422,35 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     }
 
     @Test
-    @DisplayName("PENDING 예약을 취소하면 200 CANCELLED를 받고 잔여 수량이 복원된다")
-    void 취소_PENDING_재고복원() throws Exception {
+    @DisplayName("PENDING 예약을 취소하면 200 CANCELLED를 받고 좌석이 반환된다")
+    void 취소_PENDING_좌석반환() throws Exception {
         // given
         MockHttpSession session = loginAsNewMember("canceller1@tikkit.com");
-        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 2);
-        int remainingAfterReserve = remainingOf(onSaleGrade.getId());
+        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(2));
+        int availableAfterReserve = availableSeatCount(onSaleGrade.getId());
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
-        assertThat(remainingOf(onSaleGrade.getId()))
-                .isEqualTo(remainingAfterReserve + 2);
+        assertThat(availableSeatCount(onSaleGrade.getId()))
+                .isEqualTo(availableAfterReserve + 2);
     }
 
     @Test
-    @DisplayName("CONFIRMED 예약을 마감 전에 취소하면 결제가 REFUNDED로 바뀌고 잔여 수량이 복원된다")
+    @DisplayName("CONFIRMED 예약을 마감 전에 취소하면 결제가 REFUNDED로 바뀌고 좌석이 반환된다")
     void 취소_CONFIRMED_마감전_환불() throws Exception {
         // given
         MockHttpSession session = loginAsNewMember("canceller2@tikkit.com");
-        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk());
         clearPersistenceContext();
-        int remainingAfterPay = remainingOf(onSaleGrade.getId());
+        int availableAfterPay = availableSeatCount(onSaleGrade.getId());
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(session))
@@ -333,8 +459,8 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
 
         assertThat(paymentRepository.findByReservationId(reservationId).orElseThrow().getStatus())
                 .isEqualTo(PaymentStatus.REFUNDED);
-        assertThat(remainingOf(onSaleGrade.getId()))
-                .isEqualTo(remainingAfterPay + 1);
+        assertThat(availableSeatCount(onSaleGrade.getId()))
+                .isEqualTo(availableAfterPay + 1);
     }
 
     @Test
@@ -350,9 +476,10 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .build());
         TicketGrade soonGrade = ticketGradeRepository.save(TicketGrade.builder()
                 .schedule(soonSchedule).grade(Grade.R).price(new BigDecimal("99000"))
-                .totalQuantity(5).remainingQuantity(5).build());
+                .build());
         MockHttpSession session = loginAsNewMember("canceller3@tikkit.com");
-        Long reservationId = reserveViaApi(session, soonSchedule.getId(), soonGrade.getId(), 1);
+        Long reservationId = reserveViaApi(session, soonSchedule.getId(), soonGrade.getId(),
+                createAvailableSeats(soonSchedule, soonGrade, "R-중", 1));
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
@@ -371,7 +498,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     void 다른회원_소유_예약_접근_404() throws Exception {
         // given
         MockHttpSession ownerSession = loginAsNewMember("owner@tikkit.com");
-        Long reservationId = reserveViaApi(ownerSession, onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        Long reservationId = reserveViaApi(ownerSession, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
         MockHttpSession strangerSession = loginAsNewMember("stranger@tikkit.com");
 
         // when & then
@@ -394,9 +521,9 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     void 내예매목록_본인것만_상태필터() throws Exception {
         // given
         MockHttpSession session = loginAsNewMember("lister@tikkit.com");
-        Long pendingId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        Long pendingId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
         MockHttpSession otherSession = loginAsNewMember("otherLister@tikkit.com");
-        reserveViaApi(otherSession, onSaleSchedule.getId(), onSaleGrade.getId(), 1);
+        reserveViaApi(otherSession, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
 
         // when & then: 본인 것만, PENDING만 필터링돼 1건만 조회된다
         mockMvc.perform(get("/api/v1/reservations").session(session).param("status", "PENDING"))
@@ -406,8 +533,35 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .andExpect(jsonPath("$.data.content[0].id").value(pendingId));
     }
 
-    private Long reserveViaApi(MockHttpSession session, Long scheduleId, Long ticketGradeId, int quantity) throws Exception {
-        ReservationCreateRequest request = new ReservationCreateRequest(scheduleId, ticketGradeId, quantity);
+    /** 회차에 예매 가능 좌석을 만들고 schedule_seats id 목록을 돌려준다. */
+    private List<Long> createAvailableSeats(Schedule schedule, TicketGrade grade, String section, int count) {
+        List<Long> ids = new ArrayList<>(count);
+        for (int seatNumber = 1; seatNumber <= count; seatNumber++) {
+            Seat seat = seatRepository.save(Seat.builder()
+                    .venue(venue).section(section).rowLabel("1").seatNumber(seatNumber)
+                    .posX(seatNumber).posY(1).build());
+            ids.add(scheduleSeatRepository.save(ScheduleSeat.builder()
+                    .schedule(schedule).seat(seat).ticketGrade(grade)
+                    .status(SeatStatus.AVAILABLE).build()).getId());
+        }
+        return ids;
+    }
+
+    /**
+     * 아직 아무도 고르지 않은 좌석을 quantity개 집어 준다.
+     * <p>
+     * 호출마다 다른 좌석을 돌려줘야 한 테스트 안에서 여러 회원이 선점할 수 있다. 같은 좌석을 주면
+     * 두 번째 요청이 SOLD_OUT으로 떨어져서, 검증하려던 것과 다른 이유로 테스트가 깨진다.
+     */
+    private List<Long> nextSeats(int quantity) {
+        int from = seatCursor.getAndAdd(quantity);
+        return onSaleSeatIds.subList(from, from + quantity);
+    }
+
+    private Long reserveViaApi(MockHttpSession session, Long scheduleId, Long ticketGradeId, List<Long> seatIds)
+            throws Exception {
+        ReservationCreateRequest request =
+                new ReservationCreateRequest(scheduleId, ticketGradeId, seatIds.size(), seatIds);
         MvcResult result = mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
@@ -441,9 +595,16 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
      * {@code em.clear()}로 해결하지 않은 이유: {@code onSaleGrade}·{@code onSaleSchedule} 필드까지
      * detach되어 다른 단정이 지연 로딩에서 터진다.
      */
-    private int remainingOf(Long ticketGradeId) {
-        return jdbcTemplate.queryForObject(
-                "SELECT remaining_quantity FROM ticket_grades WHERE id = ?", Integer.class, ticketGradeId);
+    /** 불변식 위반 건수를 세는 스칼라 조회. 0이 아니면 그 자체가 위반 목록의 크기다. */
+    private int countOf(String sql, Object... args) {
+        return jdbcTemplate.queryForObject(sql, Integer.class, args);
+    }
+
+    private int availableSeatCount(Long ticketGradeId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM schedule_seats
+                WHERE ticket_grade_id = ? AND status = 'AVAILABLE'
+                """, Integer.class, ticketGradeId);
     }
 
     private MockHttpSession loginAsNewMember(String email) throws Exception {
