@@ -20,13 +20,16 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 
 /**
- * 회차별 좌석 등급과 재고.
+ * 회차별 좌석 등급과 가격.
  * <p>
- * <b>재고를 바꾸는 메서드를 일부러 두지 않는다</b> (Task 019). 잔여 수량 변경은
- * {@code TicketGradeRepository}의 조건부 UPDATE({@code decreaseRemainingQuantity} /
- * {@code increaseRemainingQuantity})만 담당한다. 엔티티에 수량을 고치는 메서드를 남겨두면
- * 더티체킹 UPDATE가 조건부 UPDATE를 덮어써서 동시성 제어가 무력화되므로, 그런 경로를 아예 만들지 않았다
- * (비교 과정: {@code docs/improvements/002-db-lock-comparison.md}).
+ * <b>재고를 들고 있지 않다</b>. 지정석 전환 전에는 {@code totalQuantity}/{@code remainingQuantity}
+ * 두 컬럼이 재고였고, 그 값을 바꾸는 메서드를 일부러 두지 않아(Task 019) 조건부 UPDATE만 담당하게
+ * 했다 — 엔티티에 수량을 고치는 메서드가 있으면 더티체킹 UPDATE가 조건부 UPDATE를 덮어써서
+ * 동시성 제어가 무력화된다 (비교 과정: {@code docs/improvements/002-db-lock-comparison.md}).
+ * <p>
+ * Task 022에서 재고가 {@code schedule_seats}의 좌석 행으로 넘어가면서 두 컬럼을 {@code V6}에서
+ * 제거했다. 같은 원칙이 {@code ScheduleSeat}으로 옮겨갔다 — 그쪽에도 상태를 바꾸는 메서드가 없다.
+ * "잔여 수량"은 이제 AVAILABLE 좌석 건수로 계산되며 이 엔티티에는 저장되지 않는다.
  */
 @Getter
 @Entity
@@ -49,20 +52,11 @@ public class TicketGrade extends BaseTimeEntity {
     @Column(nullable = false, precision = 12, scale = 0)
     private BigDecimal price;
 
-    @Column(nullable = false)
-    private Integer totalQuantity;
-
-    @Column(nullable = false)
-    private Integer remainingQuantity;
-
     @Builder
-    private TicketGrade(Schedule schedule, Grade grade, BigDecimal price, Integer totalQuantity,
-                         Integer remainingQuantity) {
+    private TicketGrade(Schedule schedule, Grade grade, BigDecimal price) {
         this.schedule = schedule;
         this.grade = grade;
         this.price = price;
-        this.totalQuantity = totalQuantity;
-        this.remainingQuantity = remainingQuantity;
     }
 
 }
