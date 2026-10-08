@@ -87,14 +87,36 @@ allowed-tools:
 
 ## 병합 전략
 
+### 프로젝트 정책: Squash를 쓰지 않는다
+
+**TIKKIT은 병합할 때 커밋을 하나로 합치지 않는다.** `--squash`와 GitHub의 "Squash and merge"를
+쓰지 않고, 항상 **No-Fast-Forward 병합 커밋**(`git merge --no-ff` / `gh pr merge --merge`)으로
+브랜치의 커밋을 그대로 보존한다.
+
+이유는 이 프로젝트가 **"재현 → 해결 → 수치"를 커밋 단위로 남기는 포트폴리오**이기 때문이다.
+커밋을 레이어 단위(Migration → Entity → Repository → Service → Test → Docs)로 나누고 각 커밋
+메시지에 "왜 이렇게 짰는지"와 "다른 선택지를 왜 안 골랐는지"를 적는데, 스쿼시하면 그 기록이
+한 덩어리로 뭉개져 사라진다. `docs/improvements/`의 개선 기록이 커밋을 참조하는 경우도 있다.
+
+대가로 `main` 히스토리가 길어지고, 커밋 단위로는 빌드가 깨지는 중간 상태가 생길 수 있다
+(예: API 요청 DTO가 바뀌면 호출부를 모두 고치는 커밋까지 테스트 컴파일이 실패한다 — Task 022).
+그래서 CI는 PR 단위로 검증하며, `git bisect`를 쓸 때는 머지 커밋 기준으로 봐야 한다.
+
+- `gh pr merge <번호> --merge` ✅ (스쿼시 금지, Task 021의 PR #17과 Task 022의 PR #18이 이 방식)
+- `gh pr merge <번호> --squash` ❌
+- `gh pr merge <번호> --rebase` ❌ (커밋은 보존되지만 머지 커밋이 없어져 브랜치 경계가 사라진다)
+
 ### Fast-Forward 병합
-선형 히스토리 유지, 간단한 변경사항에 적합
+선형 히스토리 유지, 간단한 변경사항에 적합. **`main`으로 들어오는 PR에는 쓰지 않는다** —
+브랜치 경계가 사라져 "이 커밋들이 어느 작업이었나"를 알 수 없게 된다.
 
 ### No-Fast-Forward 병합
-병합 커밋으로 브랜치 히스토리 보존, 협업 프로젝트에 권장
+병합 커밋으로 브랜치 히스토리 보존. **TIKKIT의 기본 전략이다.**
 
 ### Squash 병합
-여러 커밋을 하나로 통합, 깔끔한 히스토리 유지
+여러 커밋을 하나로 통합. **이 프로젝트에서는 쓰지 않는다** (위 정책 참조).
+로컬 작업 브랜치 안에서 "오타 수정" 같은 의미 없는 커밋을 정리할 때만 `git rebase -i`로
+직접 묶고, `main`으로 병합할 때는 쓰지 않는다.
 
 ## 충돌 해결 가이드
 
@@ -128,8 +150,14 @@ allowed-tools:
 
 ```
 /git:merge feature/user-auth
-/git:merge --no-ff feature/user-auth    # No-fast-forward
-/git:merge --squash feature/user-auth   # Squash merge
+/git:merge --no-ff feature/user-auth    # No-fast-forward (기본 전략)
+```
+
+PR을 머지할 때도 같다 — 커밋을 합치지 않는다.
+
+```bash
+gh pr merge 18 --merge --delete-branch   # ✅
+gh pr merge 18 --squash                  # ❌ 커밋 기록이 뭉개진다
 ```
 
 이 커맨드는 Git 병합의 모든 복잡성을 처리하면서도 안전하고 직관적인 인터페이스를 제공합니다.

@@ -119,6 +119,10 @@ Closes #[issue-number]
 /git:pr --close           # PR 닫기
 ```
 
+**병합할 때 커밋을 하나로 합치지 않는다.** `gh pr merge --merge`로 병합 커밋을 만들어 브랜치의
+커밋을 그대로 보존하며, `--squash`는 쓰지 않는다. 이유와 대가는 `/git:merge`의 "프로젝트 정책"
+절에 있다.
+
 ## 사용 예시
 
 ```
