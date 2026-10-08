@@ -213,13 +213,22 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ **`status IN (...)` CHECK는 알 수 없는 상태를 막는 역할에서 중복**이라는 걸 테스트가 드러냈다. `'RESERVED'`를 넣으면 `schedule_seats_status_check`가 아니라 `ck_schedule_seats_status_holder`가 보고된다 — 세 값 중 어느 것도 아니니 holder의 두 분기를 모두 못 만족한다. 둘 다 위반이고 어느 쪽을 보고할지는 Postgres가 정하므로 테스트에서 제약명을 고정하지 않았다. IN 목록은 허용 값을 스키마에 드러내는 문서 역할로 남긴다
   - ✅ dev 적용 결과: `seats` 7,120 / `schedule_seats` 26,894 / `reservation_seats` 41. 공연장별 그리드가 실제로 갈라졌다(고척 80열 / 블루스퀘어 19열). 전체 테스트 125개 통과
   - 알려진 한계: **`V5`가 PENDING 예약을 HELD로 만들지만 Task 013의 만료 배치는 좌석을 모른다.** 만료된 예약의 좌석이 HELD로 고착되며, 과거 PENDING을 건너뛰면 핵심 불변식이 깨지므로 건너뛸 수도 없다 → Task 022의 좌석 반환이 **필수 후속**이다(아직 운영 중이 아니라 실제 피해는 없다). `schedule_seats.reservation_id`를 FK로 둬서 선점 UPDATE마다 부모 `reservations` 행에 `FOR KEY SHARE` 락이 잡힌다 — 한 예약당 한 사용자라 경쟁은 낮다고 봤지만 Task 022 동시성 측정에서 multixact 오버헤드가 보일 수 있다. 열당 좌석 수(20/40)와 "VIP가 무대에 가깝다"는 배치는 PRD·ERD에 근거가 없는 자체 판단이라 Task 023 화면을 보고 조정할 수 있다. 수량 정의가 `V1_1`과 `V4_1` 두 파일에 나뉘어 있다. V6 이후에는 좌석 수의 원천이 `seats`+`schedule_seats`로 뒤집히는데 PRD "MVP 제외 범위"에 관리자 기능이 빠져 있어 **새 공연장 좌석을 만드는 경로가 시드/수동 SQL뿐**이다
-- **Task 022: [BE] 좌석 조회·선점 API 전환**
-  - `GET /schedules/{id}/seats` 추가, `POST /reservations` 요청 바디에 `seatIds` 추가 (`ticketGradeId`/`quantity`는 유지 — 한 예약=한 등급 정책)
-  - 선택한 `seatIds`가 모두 동일한 `ticketGradeId`에 속하는지 애플리케이션 레벨 검증 (여러 테이블에 걸친 조건이라 DB CHECK로 불가)
-  - 정렬된 ID 기준 다중행 조건부 UPDATE, "좌석당 한 명만 선점 성공" 동시성 테스트
-  - 만료·취소 시 좌석 반환 처리 (`reservation_seats` 경유 UPDATE). **필수 후속** — V5가 기존 PENDING 예약을 HELD로 만들었지만 `ReservationExpiryScheduler`는 좌석을 모른다. 이걸 넣기 전까지 만료된 예약의 좌석이 HELD로 고착된다 (Task 021 알려진 한계)
-  - 좌석 중복 선점이 `uk_schedule_seats_schedule_seat`를 때리면 Task 020과 같은 방식으로 **서비스 레이어에서 제약명으로 가려** 409로 바꾼다. 이때 **이름 없는 CHECK의 자동 생성 이름(`{테이블}_{컬럼}_check`)에 의존하지 않는다** — 컬럼명이 바뀌거나 CHECK가 여러 개면 `_check1`, `_check2`로 붙는다 (Task 021에서 확인)
-  - `V6__drop_quantity_columns.sql`: `ticket_grades`의 수량 컬럼만 제거 (contract 단계, `reservations` 스키마는 변경 없음), `docs/improvements/004-seatmap-migration.md` 작성
+- **Task 022: [BE] 좌석 조회·선점 API 전환** ✅ - 완료
+  - ✅ 엔티티 4개 생성 — `Seat`(`domain/venue`), `ScheduleSeat`·`SeatStatus`(`domain/performance`), `ReservationSeat`(`domain/reservation`). 소유 애그리거트를 따라 쪼개 `domain/seat/` 허브를 만들지 않았다. **`TicketGrade`와 같이 상태 변경 메서드를 두지 않았다** — 더티체킹 UPDATE가 조건부 UPDATE를 덮어쓰는 경로를 아예 만들지 않는 Task 019의 결정이 그대로 옮겨왔다
+  - ✅ `GET /api/v1/schedules/{id}/seats` 추가 (평면 배열, `ORDER BY pos_y, pos_x`). 로그인 없이 조회 가능 — 등급·잔여 수량이 이미 공개인데 배치도만 막으면 "자리 보고 가입"하는 흐름이 깨진다
+  - ✅ `POST /reservations`에 `seatIds` 추가 (`ticketGradeId`/`quantity` 유지 — 한 예약=한 등급 정책). `seatIds`는 `schedule_seats.id`이고 물리 좌석이 아니다
+  - ✅ `seatIds`가 모두 같은 `(회차, 등급)`에 속하는지 애플리케이션 검증 (세 테이블 교차라 DB CHECK로 불가) → 404. 중복 좌석·매수 불일치는 400으로 끊는다 — **중복을 조용히 제거하면** 선점 좌석 수가 매수보다 적어져 `SOLD_OUT`(409)으로 떨어지고 에러가 실제 원인을 가린다
+  - ✅ 정렬된 ID 기준 다중행 조건부 UPDATE + `reservation_seats` INSERT를 데이터 변경 CTE 한 문장으로. 반환값(INSERT 행 수) ≠ 요청 좌석 수면 `SOLD_OUT`으로 롤백 — **부분 선점을 DB 제약이 아니라 이 검사가 막는다**
+  - ✅ 동시성 테스트 전환·추가 — 초과 판매 차단(좌석 10석에 100명, `i % 10`번 좌석 → 정확히 10건 성공), 좌석당 한 명만 선점(1석에 100명 → 1건), **겹치는 좌석 집합 동시 선점**(`A{0,1,2} B{2,3,4} C{1,4,5}` → 1건, 데드락 0건, 부분 선점 0건), 중복 선점 차단, 결제-만료 경쟁
+  - ✅ `AS MATERIALIZED`는 **붙이지 않았다.** 선점·만료 배치 모두 CTE를 한 번만 참조하므로 인라인돼도 결과가 달라지지 않는다. 판단 근거를 메서드 Javadoc에 적어 "참조가 늘면 명시하라"는 신호를 남겼다
+  - ✅ 만료·취소 시 좌석 반환 (`reservation_seats` 경유 UPDATE) — **Task 021의 필수 후속 해소.** 만료 배치의 `restored` CTE(등급별 `SUM` 합산)가 사라졌다. 좌석은 1:1 매칭이라 합산이 필요 없다. 반환값 의미가 "복원된 등급 수" → "반환된 좌석 수"로 바뀌어 로그 문구도 고쳤다
+  - ✅ `V6__drop_quantity_columns.sql` (contract) — `ticket_grades`의 수량 컬럼만 제거, `reservations` 스키마 무변경. `ck_ticket_grades_remaining_range`는 `DROP COLUMN`에 딸려 자동 삭제되고(롤백 트랜잭션에서 확인) 복합 FK가 의존하는 `uk_ticket_grades_id_schedule`은 생존
+  - ✅ `remainingQuantity`를 좌석 AVAILABLE 건수로 파생 — **API 응답 형식이 그대로라 FE 컴포넌트·e2e 스펙을 한 줄도 고치지 않았다.** 이중 쓰기를 피한 이유: 두 재고를 같이 갱신하면 `ticket_grades` 한 행 경쟁이 남아 좌석으로 쪼갠 효과가 상쇄된다
+  - ✅ FE는 `types/api.ts`·`lib/api/performances.ts`·`lib/actions/reservation.ts` 세 파일만. **Server Action이 좌석을 골라 `seatIds`로 변환**하므로 컴포넌트 수정이 없다 (`pickAvailableSeatIds`는 한시적 코드, Task 023에서 제거)
+  - ✅ `docs/improvements/004-seatmap-migration.md` 작성. 실측: **`schedule_seats` HOT 업데이트 100%**(Task 021 미측정 항목 해소), 잔여석 COUNT 0.82 ms, 좌석맵 조회 10.70 ms / 408,705 bytes(3,200석), 데드락 0건
+  - ✅ 검증: 백엔드 테스트 129개 통과, e2e 3개 통과, 깨끗한 DB에서 V1~V6 전체 체인 재검증(좌석 7,120 / 회차좌석 26,894 / 구역 12종)
+  - **원문 정정**: "좌석 중복 선점이 `uk_schedule_seats_schedule_seat`를 때리면 409로 가린다"는 **해당 없다.** 선점은 UPDATE라 그 UNIQUE를 때릴 수 없고, `reservation_seats`의 UNIQUE는 `distinct()` 정규화가 애초에 막는다. 영원히 안 타는 `catch`를 넣지 않았다. 자동 생성 CHECK 이름에 의존하지 않는다는 원칙은 유효하며, `status`를 enum으로 넘겨 위반 자체가 불가능하게 했다
+  - 알려진 한계: **`pickAvailableSeatIds`가 한시적 코드다** — Task 023에서 제거해야 하고, 남으면 "사용자가 고른 좌석"과 "서버가 고른 좌석" 두 경로가 공존한다. 선점 직전 좌석 400 KB를 한 번 더 조회하는 왕복도 그때 없어진다. **HOT 측정 표본이 6건**이라 경향만 본 것이고 Task 027에서 다시 재야 한다. **좌석맵 조회가 10.7 ms / 400 KB**로 잔여석 COUNT보다 13배 비싸다 — 원인은 `seats` 전체 Seq Scan과 정렬이라 V7에서 볼 것은 `idx(schedule_id, status)`가 아니다. `schedule_seats.reservation_id` FK의 `FOR KEY SHARE` multixact 오버헤드는 이번 규모에서 드러나지 않았다. `SeatBackfillMigrationTest`를 삭제했다 — V5가 `total_quantity`를 읽어서 V6 이후 재실행이 불가능하다. 지속 가치가 있는 불변식 5개는 `ReservationApiIntegrationTest.좌석_불변식`으로 옮겼다. 열당 좌석 수(20/40)와 "VIP가 무대에 가깝다"는 여전히 PRD·ERD 근거가 없는 자체 판단이다
 - **Task 023: [FE] 좌석 배치도 화면**
   - 등급별 색상이 표시되는 SVG/그리드 좌석 배치도
   - 최대 4석 선택, 요약 패널
@@ -310,5 +319,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-07
-**📊 진행 상황**: Phase 6 진행 중 — Task 021 완료, Task 022 진행 예정 (21/34 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-08
+**📊 진행 상황**: Phase 6 진행 중 — Task 021~022 완료, Task 023 진행 예정 (22/34 Tasks 완료)
