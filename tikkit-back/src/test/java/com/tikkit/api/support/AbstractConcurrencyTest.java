@@ -8,11 +8,16 @@ import com.tikkit.api.domain.performance.entity.Performance;
 import com.tikkit.api.domain.performance.entity.PerformanceCategory;
 import com.tikkit.api.domain.performance.entity.PerformanceStatus;
 import com.tikkit.api.domain.performance.entity.Schedule;
+import com.tikkit.api.domain.performance.entity.ScheduleSeat;
+import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
 import com.tikkit.api.domain.performance.repository.PerformanceRepository;
 import com.tikkit.api.domain.performance.repository.ScheduleRepository;
+import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import com.tikkit.api.domain.performance.repository.TicketGradeRepository;
+import com.tikkit.api.domain.venue.entity.Seat;
 import com.tikkit.api.domain.venue.entity.Venue;
+import com.tikkit.api.domain.venue.repository.SeatRepository;
 import com.tikkit.api.domain.venue.repository.VenueRepository;
 import com.tikkit.api.security.MemberDetails;
 import org.junit.jupiter.api.AfterEach;
@@ -82,6 +87,10 @@ public abstract class AbstractConcurrencyTest extends AbstractContainerTest {
     private ScheduleRepository scheduleRepository;
     @Autowired
     private TicketGradeRepository ticketGradeRepository;
+    @Autowired
+    private SeatRepository seatRepository;
+    @Autowired
+    private ScheduleSeatRepository scheduleSeatRepository;
 
     /**
      * 커밋된 데이터를 지운다.
@@ -97,14 +106,25 @@ public abstract class AbstractConcurrencyTest extends AbstractContainerTest {
     @BeforeEach
     @AfterEach
     void truncateAll() {
+        // 좌석 세 테이블을 명시적으로 넣는다. venues/reservations에 CASCADE가 걸려 딸려 지워질
+        // 가능성은 있지만, FK 방향에 기대는 암묵적 동작이라 목록에 적어 둬야 안전하다 (Task 022).
         jdbcTemplate.execute("""
-                TRUNCATE payments, reservations, ticket_grades, schedules, performances, venues, members
+                TRUNCATE reservation_seats, schedule_seats, seats,
+                         payments, reservations, ticket_grades, schedules, performances, venues, members
                     RESTART IDENTITY CASCADE
                 """);
     }
 
-    /** 판매 중인 회차에 등급 하나를 만든다. 재고를 인자로 받아 재현 조건(예: 10석)을 테스트가 정한다. */
-    protected TicketGrade createOnSaleGrade(int totalQuantity) {
+    /**
+     * 판매 중인 회차에 등급 하나와 예매 가능 좌석 {@code seatCount}석을 만든다.
+     * <p>
+     * 지정석 전환으로 재고가 수량 한 칸이 아니라 좌석 행이 됐기 때문에(Task 022), 재현 조건을
+     * 만들려면 좌석을 실제로 깔아야 한다. 테스트가 "어느 좌석을 노릴지" 정할 수 있도록
+     * {@code schedule_seats.id} 목록을 함께 돌려준다 — 경쟁을 만드는 건 좌석의 선택이다.
+     * <p>
+     * 등급의 수량 컬럼은 좌석 수와 같게 맞춰 두지만 아무도 읽지 않는다. V6에서 사라진다.
+     */
+    protected GradeWithSeats createOnSaleGradeWithSeats(int seatCount) {
         int seq = fixtureSequence.getAndIncrement();
         Venue venue = venueRepository.save(Venue.builder()
                 .name("동시성 테스트 공연장%d".formatted(seq))
@@ -124,13 +144,34 @@ public abstract class AbstractConcurrencyTest extends AbstractContainerTest {
                 .bookingOpenAt(Instant.now().minus(1, ChronoUnit.DAYS))
                 .bookingCloseAt(Instant.now().plus(9, ChronoUnit.DAYS))
                 .build());
-        return ticketGradeRepository.save(TicketGrade.builder()
+        TicketGrade ticketGrade = ticketGradeRepository.save(TicketGrade.builder()
                 .schedule(schedule)
                 .grade(Grade.VIP)
                 .price(new BigDecimal("150000"))
-                .totalQuantity(totalQuantity)
-                .remainingQuantity(totalQuantity)
                 .build());
+
+        List<Long> scheduleSeatIds = new ArrayList<>(seatCount);
+        for (int seatNumber = 1; seatNumber <= seatCount; seatNumber++) {
+            Seat seat = seatRepository.save(Seat.builder()
+                    .venue(venue).section("VIP-중").rowLabel("1").seatNumber(seatNumber)
+                    .posX(seatNumber).posY(1).build());
+            scheduleSeatIds.add(scheduleSeatRepository.save(ScheduleSeat.builder()
+                    .schedule(schedule).seat(seat).ticketGrade(ticketGrade)
+                    .status(SeatStatus.AVAILABLE).build()).getId());
+        }
+        return new GradeWithSeats(ticketGrade, scheduleSeatIds);
+    }
+
+    /** 등급과 그 등급에 깔린 좌석 ID 목록. 테스트가 좌석을 골라 경쟁 조건을 만든다. */
+    protected record GradeWithSeats(TicketGrade grade, List<Long> scheduleSeatIds) {
+
+        public Long scheduleId() {
+            return grade.getSchedule().getId();
+        }
+
+        public Long gradeId() {
+            return grade.getId();
+        }
     }
 
     /**

@@ -20,6 +20,7 @@ import com.tikkit.api.domain.performance.entity.PerformanceCategory;
 import com.tikkit.api.domain.performance.entity.PerformanceStatus;
 import com.tikkit.api.domain.performance.entity.Schedule;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
+import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import com.tikkit.api.domain.performance.repository.TicketGradeRepository;
 import com.tikkit.api.domain.reservation.dto.PaymentRequest;
 import com.tikkit.api.domain.reservation.dto.ReservationCreateRequest;
@@ -40,12 +41,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -68,6 +71,9 @@ class ReservationServiceTest {
     private TicketGradeRepository ticketGradeRepository;
 
     @Mock
+    private ScheduleSeatRepository scheduleSeatRepository;
+
+    @Mock
     private MemberRepository memberRepository;
 
     @Mock
@@ -82,17 +88,42 @@ class ReservationServiceTest {
     @InjectMocks
     private ReservationService reservationService;
 
+    /** {@code reservation()} 픽스처의 매수. 확정·반환 좌석 수가 이 값과 같아야 서비스가 성공 분기를 탄다. */
+    private static final int FIXTURE_QUANTITY = 2;
+
     /**
-     * 재고 차감이 조건부 UPDATE로 바뀌어서(Task 019) 1행을 차감했다고 알려주지 않으면 SOLD_OUT으로 빠진다.
-     * 목 기본값이 0이라 선점 테스트마다 필요한데, 결제·취소 테스트는 쓰지 않으므로 lenient로 둔다.
+     * 좌석 쿼리 기본 스텁.
+     * <p>
+     * 선점·확정·반환이 전부 조건부 UPDATE라(Task 019·022) "요청한 만큼 처리됐다"고 알려주지 않으면
+     * 서비스가 실패 분기로 빠진다. 목 기본값이 0이라 반드시 스텁해야 하는데 테스트마다 좌석 수가
+     * 달라서, 고정값 대신 넘어온 좌석 목록의 크기를 그대로 돌려준다.
+     * 실패를 보려는 테스트는 각자 다시 스텁한다. 안 쓰는 테스트도 있으므로 lenient로 둔다.
      */
     @BeforeEach
-    void stubStockDecrease() {
-        lenient().when(ticketGradeRepository.decreaseRemainingQuantity(any(), anyInt(), any())).thenReturn(1);
+    void stubSeatQueries() {
+        lenient().when(scheduleSeatRepository.countMatching(anyList(), any(), any()))
+                .thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).size());
+        lenient().when(scheduleSeatRepository.holdSeats(anyList(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).size());
+        lenient().when(scheduleSeatRepository.markSold(any(), any())).thenReturn(FIXTURE_QUANTITY);
+        lenient().when(scheduleSeatRepository.releaseSeats(any(), any())).thenReturn(FIXTURE_QUANTITY);
+    }
+
+    /** 좌석 ID 1..quantity를 고른 선점 요청. 서비스가 중복 제거·정렬하므로 순서는 아무래도 좋다. */
+    private ReservationCreateRequest request(int quantity) {
+        return requestFor(SCHEDULE_ID, quantity);
+    }
+
+    private ReservationCreateRequest requestFor(Long scheduleId, int quantity) {
+        List<Long> seatIds = new ArrayList<>(quantity);
+        for (long seatId = 1; seatId <= quantity; seatId++) {
+            seatIds.add(seatId);
+        }
+        return new ReservationCreateRequest(scheduleId, TICKET_GRADE_ID, quantity, seatIds);
     }
 
     /** 공연 시작(showAt) 시각을 자유롭게 지정할 수 있는 등급을 만든다. 결제/취소 테스트에서 쓴다. */
-    private TicketGrade gradeWithShowAt(Instant showAt, int remainingQuantity) {
+    private TicketGrade gradeWithShowAt(Instant showAt) {
         Venue venue = Venue.builder().name("테스트 공연장").address("서울").build();
         Performance performance = Performance.builder()
                 .title("테스트 공연")
@@ -112,8 +143,6 @@ class ReservationServiceTest {
                 .schedule(schedule)
                 .grade(Grade.VIP)
                 .price(new BigDecimal("150000"))
-                .totalQuantity(10)
-                .remainingQuantity(remainingQuantity)
                 .build();
         // 재고 복원이 조건부 UPDATE(등급 id로 호출)로 바뀌어서 id가 필요하다 (Task 019)
         ReflectionTestUtils.setField(grade, "id", TICKET_GRADE_ID);
@@ -142,8 +171,8 @@ class ReservationServiceTest {
     void 저장시_중복_선점_인덱스_위반() {
         // given: existsBy 가드는 통과했지만(동시 요청) INSERT에서 인덱스에 걸린 상황
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(1);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000002");
@@ -161,8 +190,8 @@ class ReservationServiceTest {
     void 저장시_다른_제약_위반은_전파() {
         // 예약번호 시퀀스 한 바퀴(uk_reservations_reservation_no) 같은 건 의미가 달라서 뭉개면 안 된다.
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(1);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000003");
@@ -185,7 +214,7 @@ class ReservationServiceTest {
                 new ConstraintViolationException("중복 키", new SQLException("23505"), constraintName));
     }
 
-    private TicketGrade ticketGrade(Instant bookingOpenAt, Instant bookingCloseAt, int remainingQuantity) {
+    private TicketGrade ticketGrade(Instant bookingOpenAt, Instant bookingCloseAt) {
         Venue venue = Venue.builder().name("테스트 공연장").address("서울").build();
         Performance performance = Performance.builder()
                 .title("테스트 공연")
@@ -207,8 +236,6 @@ class ReservationServiceTest {
                 .schedule(schedule)
                 .grade(Grade.VIP)
                 .price(new BigDecimal("150000"))
-                .totalQuantity(10)
-                .remainingQuantity(remainingQuantity)
                 .build();
         ReflectionTestUtils.setField(grade, "id", TICKET_GRADE_ID);
         return grade;
@@ -219,8 +246,8 @@ class ReservationServiceTest {
     void 선점_성공() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 2);
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(2);
         Member member = Member.builder()
                 .email("test@tikkit.com").password("encoded").name("홍길동").phone("010-1111-2222")
                 .role(MemberRole.USER).build();
@@ -236,8 +263,10 @@ class ReservationServiceTest {
         assertThat(response.status()).isEqualTo(ReservationStatus.PENDING);
         assertThat(response.reservationNo()).isEqualTo("TK260927-000001");
         assertThat(response.expiresAt()).isNotNull();
-        // 재고 차감은 엔티티가 아니라 조건부 UPDATE가 한다 (Task 019) — 요청 수량이 그대로 넘어갔는지 확인한다.
-        verify(ticketGradeRepository).decreaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any());
+        // 재고 차감이 아니라 좌석 선점이 재고를 움직인다 (Task 022) — 고른 좌석이 정렬된 상태로
+        // 넘어갔는지까지 확인한다. 정렬이 데드락 방지의 전부이므로 서비스가 빠뜨리면 바로 잡아야 한다.
+        verify(scheduleSeatRepository).holdSeats(
+                eq(List.of(1L, 2L)), any(), eq(TICKET_GRADE_ID), eq(grade.getPrice()), any());
         verify(reservationRepository).save(any());
     }
 
@@ -246,7 +275,7 @@ class ReservationServiceTest {
     void 등급_없음() {
         // given
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.empty());
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        ReservationCreateRequest request = request(1);
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -260,8 +289,8 @@ class ReservationServiceTest {
     void 회차_불일치() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(999L, TICKET_GRADE_ID, 1);
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = requestFor(999L, 1);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
@@ -276,8 +305,8 @@ class ReservationServiceTest {
     void 오픈_전() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.plus(1, ChronoUnit.DAYS), now.plus(2, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        TicketGrade grade = ticketGrade(now.plus(1, ChronoUnit.DAYS), now.plus(2, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(1);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
@@ -292,8 +321,8 @@ class ReservationServiceTest {
     void 마감_후() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(2, ChronoUnit.DAYS), now.minus(1, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        TicketGrade grade = ticketGrade(now.minus(2, ChronoUnit.DAYS), now.minus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(1);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
@@ -308,8 +337,8 @@ class ReservationServiceTest {
     void 중복_선점() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 5);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 1);
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(1);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(reservationRepository.existsByMemberIdAndTicketGradeIdAndStatus(
                 MEMBER_ID, TICKET_GRADE_ID, ReservationStatus.PENDING)).willReturn(true);
@@ -319,25 +348,82 @@ class ReservationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.DUPLICATE_PENDING_RESERVATION);
         verify(reservationRepository, never()).save(any());
-        // 중복 체크에서 걸렸으므로 재고는 차감되지 않아야 한다
-        assertThat(grade.getRemainingQuantity()).isEqualTo(5);
+        // 중복 체크에서 걸렸으므로 좌석도 건드리지 않아야 한다
+        verify(scheduleSeatRepository, never()).holdSeats(anyList(), any(), any(), any(), any());
     }
 
     @Test
-    @DisplayName("잔여 수량보다 많이 요청하면 SOLD_OUT 예외를 던진다")
-    void 재고_부족() {
+    @DisplayName("고른 좌석 중 하나라도 이미 선점됐으면 SOLD_OUT 예외를 던진다")
+    void 좌석_선점_실패() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS), 1);
-        ReservationCreateRequest request = new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 2);
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(2);
         given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
-        // 재고 부족은 조건부 UPDATE가 0행으로 알려준다 (Task 019) — 메모리 값으로 판단하지 않는다
-        given(ticketGradeRepository.decreaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any())).willReturn(0);
+        given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
+        given(reservationNoGenerator.generate(any())).willReturn("TK260927-000004");
+        // 2석을 요청했는데 1석만 잡혔다 — 그 사이 누군가 먼저 가져갔다는 뜻이다.
+        // 부분 선점을 막는 건 DB 제약이 아니라 "바뀐 행 수 == 요청 좌석 수" 검사다.
+        given(scheduleSeatRepository.holdSeats(anyList(), any(), any(), any(), any())).willReturn(1);
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.SOLD_OUT);
+        // 전환 전에는 재고 차감이 먼저여서 save가 아예 호출되지 않았다. 지금은 ck_schedule_seats_status_holder
+        // 때문에 예약 행이 먼저 있어야 좌석을 잡을 수 있어서, save는 이미 실행됐고 롤백이 되돌린다.
+        verify(reservationRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("같은 좌석을 중복해서 고르면 VALIDATION_ERROR를 던진다 — 조용히 제거하면 SOLD_OUT으로 오해된다")
+    void 좌석_중복_선택() {
+        // given
+        Instant now = Instant.now();
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request =
+                new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 2, List.of(1L, 1L));
+        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+
+        // when & then
+        assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.VALIDATION_ERROR);
+        verify(reservationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("고른 좌석 수와 매수가 다르면 VALIDATION_ERROR를 던진다")
+    void 좌석수_매수_불일치() {
+        // given
+        Instant now = Instant.now();
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request =
+                new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 3, List.of(1L, 2L));
+        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+
+        // when & then
+        assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.VALIDATION_ERROR);
+        verify(reservationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("요청한 등급에 속하지 않는 좌석이 섞이면 NOT_FOUND를 던진다")
+    void 등급_어긋난_좌석() {
+        // given: 세 테이블에 걸친 조건이라 DB CHECK로는 막을 수 없어 애플리케이션이 검증한다
+        Instant now = Instant.now();
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        ReservationCreateRequest request = request(2);
+        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        // 2석을 물어봤는데 1석만 이 회차·이 등급에 있다
+        given(scheduleSeatRepository.countMatching(anyList(), eq(SCHEDULE_ID), eq(TICKET_GRADE_ID))).willReturn(1);
+
+        // when & then
+        assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.NOT_FOUND);
         verify(reservationRepository, never()).save(any());
     }
 
@@ -346,7 +432,7 @@ class ReservationServiceTest {
     void 결제_성공() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 5);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation reservation = reservation(ReservationStatus.PENDING, now.plus(5, ChronoUnit.MINUTES), grade);
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
         given(paymentGateway.approve(reservation.getReservationNo(), reservation.getTotalAmount(), PaymentMethod.CARD))
@@ -369,7 +455,7 @@ class ReservationServiceTest {
     void 결제_실패_만료시각_경과() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 5);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation reservation = reservation(ReservationStatus.PENDING, now.minus(1, ChronoUnit.MINUTES), grade);
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
 
@@ -386,7 +472,7 @@ class ReservationServiceTest {
     void 결제_실패_이미_EXPIRED() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 5);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation reservation = reservation(ReservationStatus.EXPIRED, now.minus(1, ChronoUnit.HOURS), grade);
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
 
@@ -401,7 +487,7 @@ class ReservationServiceTest {
     void 결제_실패_이미_확정() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 5);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation reservation = reservation(ReservationStatus.CONFIRMED, now.plus(5, ChronoUnit.MINUTES), grade);
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
 
@@ -428,13 +514,13 @@ class ReservationServiceTest {
     void 취소_PENDING_재고복원() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 3);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation reservation = reservation(ReservationStatus.PENDING, now.minus(1, ChronoUnit.MINUTES), grade); // 만료 시각 지나도 취소는 허용
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
         // 조건부 전이와 조건부 복원이 각각 1행을 바꿨다고 알려준다 (Task 019)
         given(reservationRepository.cancelIfStatus(eq(RESERVATION_ID), eq(ReservationStatus.PENDING), any()))
                 .willReturn(1);
-        given(ticketGradeRepository.increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any())).willReturn(1);
+        given(scheduleSeatRepository.releaseSeats(eq(RESERVATION_ID), any())).willReturn(2);
 
         // when
         ReservationResponse response = reservationService.cancel(MEMBER_ID, RESERVATION_ID);
@@ -442,7 +528,7 @@ class ReservationServiceTest {
         // then
         assertThat(response.status()).isEqualTo(ReservationStatus.CANCELLED);
         // 재고 복원은 엔티티가 아니라 조건부 UPDATE가 한다 — 수량 2가 그대로 넘어갔는지 확인한다
-        verify(ticketGradeRepository).increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any());
+        verify(scheduleSeatRepository).releaseSeats(eq(RESERVATION_ID), any());
         verify(paymentGateway, never()).refund(anyString());
     }
 
@@ -451,14 +537,14 @@ class ReservationServiceTest {
     void 취소_CONFIRMED_마감전_환불() {
         // given: 공연 시작이 충분히 남아있어 24시간 취소 마감 전이다
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 3);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation reservation = reservation(ReservationStatus.CONFIRMED, now.plus(5, ChronoUnit.MINUTES), grade);
         Payment payment = Payment.paid(reservation, PaymentMethod.CARD, "mock-tx-key", now.minus(1, ChronoUnit.HOURS));
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
         given(paymentRepository.findByReservationId(RESERVATION_ID)).willReturn(Optional.of(payment));
         given(reservationRepository.cancelIfStatus(eq(RESERVATION_ID), eq(ReservationStatus.CONFIRMED), any()))
                 .willReturn(1);
-        given(ticketGradeRepository.increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any())).willReturn(1);
+        given(scheduleSeatRepository.releaseSeats(eq(RESERVATION_ID), any())).willReturn(2);
 
         // when
         ReservationResponse response = reservationService.cancel(MEMBER_ID, RESERVATION_ID);
@@ -466,7 +552,7 @@ class ReservationServiceTest {
         // then
         assertThat(response.status()).isEqualTo(ReservationStatus.CANCELLED);
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
-        verify(ticketGradeRepository).increaseRemainingQuantity(eq(TICKET_GRADE_ID), eq(2), any());
+        verify(scheduleSeatRepository).releaseSeats(eq(RESERVATION_ID), any());
         verify(paymentGateway).refund("mock-tx-key");
     }
 
@@ -475,7 +561,7 @@ class ReservationServiceTest {
     void 취소_CONFIRMED_마감후() {
         // given: 공연 시작까지 24시간이 채 안 남았다
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(12, ChronoUnit.HOURS), 3);
+        TicketGrade grade = gradeWithShowAt(now.plus(12, ChronoUnit.HOURS));
         Reservation reservation = reservation(ReservationStatus.CONFIRMED, now.plus(5, ChronoUnit.MINUTES), grade);
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(reservation));
 
@@ -484,7 +570,8 @@ class ReservationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.CANCEL_DEADLINE_PASSED);
         verify(paymentGateway, never()).refund(anyString());
-        assertThat(grade.getRemainingQuantity()).isEqualTo(3); // 복원되지 않음
+        // 마감 검사에서 끊겼으므로 좌석도 반환되지 않아야 한다
+        verify(scheduleSeatRepository, never()).releaseSeats(any(), any());
     }
 
     @Test
@@ -492,7 +579,7 @@ class ReservationServiceTest {
     void 취소_실패_이미_종결된_예약() {
         // given
         Instant now = Instant.now();
-        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS), 3);
+        TicketGrade grade = gradeWithShowAt(now.plus(30, ChronoUnit.DAYS));
         Reservation cancelled = reservation(ReservationStatus.CANCELLED, now.minus(1, ChronoUnit.HOURS), grade);
         given(reservationRepository.findMineWithDetails(RESERVATION_ID, MEMBER_ID)).willReturn(Optional.of(cancelled));
 

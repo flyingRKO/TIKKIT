@@ -12,14 +12,19 @@ import com.tikkit.api.domain.performance.entity.Performance;
 import com.tikkit.api.domain.performance.entity.PerformanceCategory;
 import com.tikkit.api.domain.performance.entity.PerformanceStatus;
 import com.tikkit.api.domain.performance.entity.Schedule;
+import com.tikkit.api.domain.performance.entity.ScheduleSeat;
+import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
 import com.tikkit.api.domain.performance.repository.PerformanceRepository;
 import com.tikkit.api.domain.performance.repository.ScheduleRepository;
+import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import com.tikkit.api.domain.performance.repository.TicketGradeRepository;
 import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
+import com.tikkit.api.domain.venue.entity.Seat;
 import com.tikkit.api.domain.venue.entity.Venue;
+import com.tikkit.api.domain.venue.repository.SeatRepository;
 import com.tikkit.api.domain.venue.repository.VenueRepository;
 import com.tikkit.api.support.AbstractContainerTest;
 import jakarta.persistence.EntityManager;
@@ -36,6 +41,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -55,6 +62,10 @@ class ReservationRepositoryTest extends AbstractContainerTest {
     private ScheduleRepository scheduleRepository;
     @Autowired
     private TicketGradeRepository ticketGradeRepository;
+    @Autowired
+    private SeatRepository seatRepository;
+    @Autowired
+    private ScheduleSeatRepository scheduleSeatRepository;
     @Autowired
     private ReservationRepository reservationRepository;
     @Autowired
@@ -88,8 +99,6 @@ class ReservationRepositoryTest extends AbstractContainerTest {
                 .schedule(schedule)
                 .grade(Grade.VIP)
                 .price(new BigDecimal("150000"))
-                .totalQuantity(10)
-                .remainingQuantity(10)
                 .build());
         member = memberRepository.save(Member.builder()
                 .email("test@tikkit.com")
@@ -168,8 +177,6 @@ class ReservationRepositoryTest extends AbstractContainerTest {
                 .schedule(otherSchedule)
                 .grade(Grade.R)
                 .price(new BigDecimal("99000"))
-                .totalQuantity(10)
-                .remainingQuantity(10)
                 .build());
 
         // when: schedule은 회차 A(setUp()), ticketGrade는 회차 B의 것으로 어긋나게 예약을 만든다
@@ -188,11 +195,11 @@ class ReservationRepositoryTest extends AbstractContainerTest {
         assertThatThrownBy(() -> reservationRepository.saveAndFlush(invalid))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
-
     @Test
-    @DisplayName("만료 배치는 같은 등급에서 여러 건이 동시에 만료돼도 수량을 합산해 잔여 수량을 복원한다")
-    void 만료_배치_같은등급_여러건_합산_복원() {
-        // given: 같은 등급에 서로 다른 회원의 PENDING 2건이 이미 만료돼 있다
+    @DisplayName("만료 배치는 만료된 예약이 점유한 좌석을 예매 가능 상태로 반환한다")
+    void 만료_배치_좌석_반환() {
+        // given: 같은 등급에 서로 다른 회원의 PENDING 2건이 이미 만료돼 있고, 각자 좌석을 점유 중이다
+        // (V5 백필이 과거 PENDING을 HELD로 만들어 놨는데 이 배치가 좌석을 몰라 고착됐던 문제 — Task 021 알려진 한계)
         Instant now = Instant.now();
         Instant pastExpiresAt = now.minus(1, ChronoUnit.MINUTES);
         Member other = memberRepository.save(Member.builder()
@@ -200,29 +207,26 @@ class ReservationRepositoryTest extends AbstractContainerTest {
                 .role(MemberRole.USER).build());
         Reservation expired1 = reservationRepository.save(pendingReservation(member, 2, pastExpiresAt));
         Reservation expired2 = reservationRepository.save(pendingReservation(other, 3, pastExpiresAt));
-        // 실제 선점 흐름(ReservationService.create)처럼 선점 시점에 잔여 수량을 미리 차감해둔다 —
-        // 그래야 배치가 복원했을 때 remaining_quantity <= total_quantity CHECK 제약을 어기지 않는다.
-        // Task 019부터 재고 차감은 조건부 UPDATE가 담당한다.
-        ticketGradeRepository.decreaseRemainingQuantity(ticketGrade.getId(), 2 + 3, now);
-        em.flush();
-        em.clear();
+
+        List<Long> seatIds = createAvailableSeats(5);
+        holdSeats(expired1, seatIds.subList(0, 2), now);
+        holdSeats(expired2, seatIds.subList(2, 5), now);
+        assertThat(availableSeatCount()).as("선점으로 예매 가능 좌석이 모두 소진됐다").isZero();
 
         // when
-        int affected = reservationRepository.expirePendingReservations(now);
+        int releasedSeats = reservationRepository.expirePendingReservations(now);
 
-        // then
-        assertThat(affected).isEqualTo(1); // ticket_grades 기준 반영 건수(등급 1개가 합산 반영됨)
+        // then: 반환값이 등급 수가 아니라 좌석 수다 (한 예약이 여러 좌석을 가진다)
+        assertThat(releasedSeats).isEqualTo(5);
         assertThat(reservationRepository.findById(expired1.getId()).orElseThrow().getStatus())
                 .isEqualTo(ReservationStatus.EXPIRED);
         assertThat(reservationRepository.findById(expired2.getId()).orElseThrow().getStatus())
                 .isEqualTo(ReservationStatus.EXPIRED);
-        // 선점 시 5(=2+3) 차감했다가 배치로 그대로 복원되므로 원래 수량(10)으로 돌아온다
-        assertThat(ticketGradeRepository.findById(ticketGrade.getId()).orElseThrow().getRemainingQuantity())
-                .isEqualTo(10);
+        assertThat(availableSeatCount()).as("점유 좌석 5석이 모두 반환됐다").isEqualTo(5);
     }
 
     @Test
-    @DisplayName("만료 배치는 아직 만료 시각이 안 지난 PENDING과 CONFIRMED 예약은 건드리지 않는다")
+    @DisplayName("만료 배치는 아직 만료 시각이 안 지난 PENDING과 CONFIRMED 예약의 좌석은 건드리지 않는다")
     void 만료_배치_대상이_아닌_예약은_건드리지_않음() {
         // given
         Instant now = Instant.now();
@@ -236,19 +240,23 @@ class ReservationRepositoryTest extends AbstractContainerTest {
                 .expiresAt(now.minus(1, ChronoUnit.MINUTES)) // 확정 후에도 남아있는 과거 expiresAt — 상태가 CONFIRMED라 대상이 아님
                 .confirmedAt(now.minus(10, ChronoUnit.MINUTES))
                 .build());
-        em.flush();
-        em.clear();
+
+        // 좌석 3석 중 1석은 선점, 1석은 판매 완료, 1석은 그대로 남겨둔다
+        List<Long> seatIds = createAvailableSeats(3);
+        holdSeats(stillPending, seatIds.subList(0, 1), now);
+        holdSeats(confirmed, seatIds.subList(1, 2), now);
+        assertThat(scheduleSeatRepository.markSold(confirmed.getId(), now)).isEqualTo(1);
 
         // when
-        reservationRepository.expirePendingReservations(now);
+        int releasedSeats = reservationRepository.expirePendingReservations(now);
 
         // then
+        assertThat(releasedSeats).as("반환된 좌석이 없다").isZero();
         assertThat(reservationRepository.findById(stillPending.getId()).orElseThrow().getStatus())
                 .isEqualTo(ReservationStatus.PENDING);
         assertThat(reservationRepository.findById(confirmed.getId()).orElseThrow().getStatus())
                 .isEqualTo(ReservationStatus.CONFIRMED);
-        assertThat(ticketGradeRepository.findById(ticketGrade.getId()).orElseThrow().getRemainingQuantity())
-                .isEqualTo(10); // 복원 없음
+        assertThat(availableSeatCount()).as("남겨둔 1석만 예매 가능하다").isEqualTo(1);
     }
 
     @Test
@@ -347,5 +355,36 @@ class ReservationRepositoryTest extends AbstractContainerTest {
                 .status(ReservationStatus.PENDING)
                 .expiresAt(expiresAt)
                 .build();
+    }
+
+    /** 회차에 예매 가능 좌석을 count개 만들고 schedule_seats id 목록을 돌려준다. */
+    private List<Long> createAvailableSeats(int count) {
+        List<Long> ids = new ArrayList<>(count);
+        for (int seatNumber = 1; seatNumber <= count; seatNumber++) {
+            Seat seat = seatRepository.save(Seat.builder()
+                    .venue(schedule.getPerformance().getVenue())
+                    .section("VIP-중").rowLabel("1").seatNumber(seatNumber)
+                    .posX(seatNumber).posY(1).build());
+            ids.add(scheduleSeatRepository.save(ScheduleSeat.builder()
+                    .schedule(schedule).seat(seat).ticketGrade(ticketGrade)
+                    .status(SeatStatus.AVAILABLE).build()).getId());
+        }
+        return ids;
+    }
+
+    /**
+     * 운영 선점 쿼리를 그대로 써서 픽스처를 만든다. 테스트 전용 INSERT를 따로 두면 실제 선점 경로와
+     * 조용히 어긋날 수 있고, ck_schedule_seats_status_holder 같은 제약도 우회하게 된다.
+     */
+    private void holdSeats(Reservation reservation, List<Long> seatIds, Instant now) {
+        int held = scheduleSeatRepository.holdSeats(
+                seatIds, reservation.getId(), ticketGrade.getId(), reservation.getUnitPrice(), now);
+        assertThat(held).as("픽스처 선점이 성공했다").isEqualTo(seatIds.size());
+    }
+
+    /** 벌크 UPDATE는 1차 캐시를 갱신하지 않으므로 스칼라 집계로 DB 값을 직접 읽는다. */
+    private int availableSeatCount() {
+        return scheduleSeatRepository.countAvailableByScheduleId(schedule.getId())
+                .getOrDefault(ticketGrade.getId(), 0);
     }
 }
