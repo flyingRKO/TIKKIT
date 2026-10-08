@@ -10,6 +10,7 @@ import com.tikkit.api.domain.payment.gateway.PaymentGateway;
 import com.tikkit.api.domain.payment.repository.PaymentRepository;
 import com.tikkit.api.domain.performance.entity.Schedule;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
+import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import com.tikkit.api.domain.performance.repository.TicketGradeRepository;
 import com.tikkit.api.domain.reservation.dto.PaymentRequest;
 import com.tikkit.api.domain.reservation.dto.PaymentResponse;
@@ -28,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 재고와 예약 상태를 바꾸는 모든 경로는 조건부 UPDATE를 쓴다 (Task 019).
@@ -45,6 +47,7 @@ public class ReservationService {
 
     private final ReservationRepository reservationRepository;
     private final TicketGradeRepository ticketGradeRepository;
+    private final ScheduleSeatRepository scheduleSeatRepository;
     private final MemberRepository memberRepository;
     private final ReservationNoGenerator reservationNoGenerator;
     private final PaymentRepository paymentRepository;
@@ -53,9 +56,17 @@ public class ReservationService {
     /**
      * 예매 선점(PENDING 홀드)을 생성한다.
      * <p>
-     * 재고 차감은 조건부 UPDATE({@code TicketGradeRepository.decreaseRemainingQuantity})가 담당한다.
-     * 읽은 값을 애플리케이션이 다시 쓰지 않으므로 lost update가 구조적으로 불가능하다
+     * 좌석 선점은 조건부 UPDATE({@code ScheduleSeatRepository.holdSeats})가 담당한다. 읽은 값을
+     * 애플리케이션이 다시 쓰지 않으므로 lost update가 구조적으로 불가능하다
      * (비관적·낙관적 락과의 비교: {@code docs/improvements/002-db-lock-comparison.md}).
+     * <p>
+     * 지정석 전환으로 경쟁 대상이 {@code ticket_grades} 한 행에서 {@code schedule_seats} N행으로
+     * 바뀌었다. 한 행을 다툴 때와 달리 "요청한 4석 중 2석만 성공"이 가능하므로, 바뀐 행 수가 요청
+     * 좌석 수와 같은지 검사해 다르면 예외로 롤백시킨다 — 부분 선점을 DB 제약이 아니라 이 검사가 막는다.
+     * <p>
+     * <b>예약을 좌석보다 먼저 INSERT한다.</b> {@code ck_schedule_seats_status_holder}가 HELD 좌석에
+     * {@code reservation_id}를 요구하고 그 컬럼이 {@code reservations} FK라, 예약 행이 없으면 좌석을
+     * 잡을 수가 없다. 전환 전에는 재고 차감이 먼저였는데 순서가 뒤집힌 지점이다.
      */
     @Transactional
     public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
@@ -73,16 +84,19 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.BOOKING_NOT_OPEN);
         }
 
+        List<Long> seatIds = normalizeSeatIds(request);
+
         // 같은 회원이 같은 등급에 이미 선점 중인 PENDING 예약이 있으면 중복 선점을 막는다.
         if (reservationRepository.existsByMemberIdAndTicketGradeIdAndStatus(
                 memberId, ticketGrade.getId(), ReservationStatus.PENDING)) {
             throw new BusinessException(ErrorCode.DUPLICATE_PENDING_RESERVATION);
         }
 
-        // 엔티티 필드를 건드리지 않는 것이 중요하다 — 영속 인스턴스가 더티가 되면 flush 시점에
-        // Hibernate가 메모리의 낡은 값으로 UPDATE를 또 발행해 이 조건부 UPDATE를 덮어쓴다.
-        if (ticketGradeRepository.decreaseRemainingQuantity(ticketGrade.getId(), request.quantity(), now) == 0) {
-            throw new BusinessException(ErrorCode.SOLD_OUT);
+        // 고른 좌석이 모두 이 회차·이 등급에 속하는지 확인한다. 세 테이블에 걸친 조건이라 DB CHECK로는
+        // 표현할 수 없다 (docs/ROADMAP.md Task 022). 아래 선점 UPDATE가 같은 조건을 다시 걸므로
+        // 이건 최종 방어선이 아니다 — "없는 좌석"(404)과 "이미 팔린 좌석"(409)을 구분해 주기 위한 조회다.
+        if (scheduleSeatRepository.countMatching(seatIds, schedule.getId(), ticketGrade.getId()) != seatIds.size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
 
         String reservationNo = reservationNoGenerator.generate(now);
@@ -102,7 +116,40 @@ public class ReservationService {
             throw e;
         }
 
+        // 엔티티 필드를 건드리지 않는 것이 중요하다 — 영속 인스턴스가 더티가 되면 flush 시점에
+        // Hibernate가 메모리의 낡은 값으로 UPDATE를 또 발행해 이 조건부 UPDATE를 덮어쓴다.
+        int held = scheduleSeatRepository.holdSeats(
+                seatIds, reservation.getId(), ticketGrade.getId(), reservation.getUnitPrice(), now);
+        if (held != seatIds.size()) {
+            // 한 석이라도 놓쳤으면 전부 되돌린다. 좌석을 직접 고르는 UX에서는 "고른 자리 중 누가 먼저
+            // 잡았다"가 전부라, 몇 석이 남았는지는 의미가 없으므로 기존 SOLD_OUT을 그대로 쓴다.
+            throw new BusinessException(ErrorCode.SOLD_OUT);
+        }
+
         return toResponse(reservation);
+    }
+
+    /**
+     * 좌석 ID를 중복 제거하고 정렬한다.
+     * <p>
+     * <b>정렬이 핵심이다.</b> 여러 사용자가 겹치는 좌석 집합을 동시에 선점할 때, 락을 잡는 순서가
+     * 요청마다 다르면 서로를 기다리는 데드락이 생긴다. 모든 요청이 같은 순서로 잡게 만들면
+     * 그 순환이 애초에 성립하지 않는다.
+     * <p>
+     * 중복과 매수 불일치는 {@code @Valid}로 걸러낼 수 없는 교차 필드 조건이라 여기서 400으로 끊는다.
+     * 중복을 조용히 제거하지 않는 이유: 그러면 선점된 좌석 수가 매수보다 적어져 아래 검사에서
+     * SOLD_OUT(409)으로 떨어지는데, 실제 원인은 잘못된 요청이라 에러가 사용자를 오해하게 만든다.
+     */
+    private List<Long> normalizeSeatIds(ReservationCreateRequest request) {
+        List<Long> seatIds = request.seatIds().stream().distinct().sorted().toList();
+        if (seatIds.size() != request.seatIds().size()) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "같은 좌석을 중복해서 선택했습니다.");
+        }
+        if (seatIds.size() != request.quantity()) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
+                    "선택한 좌석 수(%d)와 매수(%d)가 다릅니다.".formatted(seatIds.size(), request.quantity()));
+        }
+        return seatIds;
     }
 
     /**
@@ -173,6 +220,17 @@ public class ReservationService {
             throw new BusinessException(resolveConfirmConflict(id));
         }
 
+        // 선점 좌석을 판매 완료로 전이한다. 위 확정 전이를 통과했다는 건 만료 배치도 취소도 이 예약을
+        // 건드리지 못했다는 뜻이라 좌석은 HELD여야 한다. 건수가 어긋나면 불변식이 깨진 것이므로,
+        // 승인된 결제를 되돌리고 롤백시킨다 — 조용히 넘기면 돈은 받고 좌석은 안 넘긴 상태가 된다.
+        int sold = scheduleSeatRepository.markSold(id, now);
+        if (sold != reservation.getQuantity()) {
+            compensateApprovedPayment(transactionKey);
+            throw new IllegalStateException(
+                    "예약(id=%d) 확정 중 선점 좌석 %d석 가운데 %d석만 전이됐습니다."
+                            .formatted(id, reservation.getQuantity(), sold));
+        }
+
         paymentRepository.save(Payment.paid(reservation, request.method(), transactionKey, now));
 
         // 조건부 UPDATE로 바꿨으니 영속 인스턴스의 status/confirmedAt은 낡은 값이다 — 전이 결과를 직접 넘긴다.
@@ -209,7 +267,7 @@ public class ReservationService {
 
     /**
      * 예매를 취소한다. PENDING은 시점 제한 없이, CONFIRMED는 공연 24시간 전까지만 가능하다 (docs/PRD.md 참조).
-     * CONFIRMED 취소는 결제를 환불 처리하고, 두 상태 모두 취소 시 잔여 수량을 복원한다.
+     * CONFIRMED 취소는 결제를 환불 처리하고, 두 상태 모두 취소 시 점유한 좌석을 반환한다.
      */
     @Transactional
     public ReservationResponse cancel(Long memberId, Long id) {
@@ -239,13 +297,15 @@ public class ReservationService {
             payment.refund(now);
         }
 
-        int restored = ticketGradeRepository.increaseRemainingQuantity(
-                reservation.getTicketGrade().getId(), reservation.getQuantity(), now);
-        if (restored == 0) {
-            // 상한을 넘기는 복원 = 이미 누군가 복원했다는 뜻. 위 조건부 전이를 통과했으므로 도달할 수 없다.
-            // 조용히 넘기면 재고가 영구히 어긋나므로 롤백시켜 전이까지 되돌린다.
+        // 좌석을 예매 가능 상태로 되돌린다. PENDING이면 HELD, CONFIRMED면 SOLD 좌석을 반납하는데
+        // 둘 다 "현재 점유자가 이 예약"이라는 같은 조건으로 잡히므로 분기가 필요 없다.
+        // 위 조건부 전이를 통과한 트랜잭션만 여기 오므로 이중 반납이 일어날 수 없다.
+        int released = scheduleSeatRepository.releaseSeats(id, now);
+        if (released != reservation.getQuantity()) {
+            // 조용히 넘기면 좌석이 영구히 팔리지 않는 상태로 남으므로 롤백시켜 전이까지 되돌린다.
             throw new IllegalStateException(
-                    "예약(id=%d) 취소 중 재고 복원이 상한을 넘었습니다 — 이중 복원 가능성".formatted(id));
+                    "예약(id=%d) 취소 중 좌석 %d석 가운데 %d석만 반환됐습니다."
+                            .formatted(id, reservation.getQuantity(), released));
         }
 
         return toResponse(reservation, ReservationStatus.CANCELLED, reservation.getConfirmedAt(), now);

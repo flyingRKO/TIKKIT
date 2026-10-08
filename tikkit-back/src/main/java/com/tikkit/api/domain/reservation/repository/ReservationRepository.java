@@ -63,17 +63,26 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long>,
     Optional<ReservationStatus> findStatusById(@Param("id") Long id);
 
     /**
-     * 만료 시각이 지난 PENDING 예약을 일괄 EXPIRED 처리하고, 등급별 잔여 수량을 합산해 복원한다.
+     * 만료 시각이 지난 PENDING 예약을 일괄 EXPIRED 처리하고, 그 예약이 점유한 좌석을 반환한다.
      * data-modifying CTE 한 문장으로 두 단계를 묶어 원자적으로 반영한다 (ReservationExpiryScheduler에서 60초마다 호출).
      * <p>
-     * 두 번째 UPDATE는 등급 단위 SUM으로 합산한 뒤 반영한다 — 같은 등급에서 여러 건이 동시에 만료되면
-     * {@code UPDATE ... FROM}이 대상 행 하나에 여러 소스 행을 매칭시키는데, PostgreSQL은 그중 하나만 반영하기 때문이다.
+     * <b>좌석 반환이 Task 022의 필수 후속이었다.</b> V5 백필이 과거 PENDING 예약을 HELD로 만들었는데
+     * 이 배치가 좌석을 몰라서, 만료된 예약의 좌석이 HELD로 고착돼 있었다 (docs/ROADMAP.md Task 021 알려진 한계).
      * <p>
-     * 동시성 미보장 — 이 배치와 결제(ReservationService.pay)가 같은 예약을 동시에 건드리면
-     * 재고가 이중으로 복원될 수 있다. Task 018에서 재현 대상으로 남긴다 (docs/ROADMAP.md 참조).
+     * 좌석을 {@code reservation_seats} 경유로 찾는다 — {@code schedule_seats.reservation_id}에는
+     * HOT 업데이트를 지키려고 인덱스를 두지 않았다. {@code ss.reservation_id = rs.reservation_id} 조건이
+     * 추가로 필요한 이유: 이력은 append-only라 과거에 그 예약이 받았던 좌석까지 남아 있으므로,
+     * 현재 점유자가 그 예약인 좌석만 되돌려야 한다. 이 조건이 대상 행과 소스 행을 1:1로 묶어주기도 한다.
      * <p>
-     * native 쿼리라 JPA Auditing이 적용되지 않아 updated_at을 직접 넣는다. 반환값은 최종 UPDATE(ticket_grades) 기준
-     * 영향받은 행 수이며, 만료된 예약 건수와는 다르다(등급이 겹치면 더 적을 수 있다).
+     * {@code expired} CTE를 한 번만 참조하므로 {@code AS MATERIALIZED}가 필요 없다. 참조가 늘면
+     * 그때는 키워드를 명시해야 한다 (docs/ROADMAP.md Task 022).
+     * <p>
+     * 결제(ReservationService.pay)와 동시에 돌아도 안전하다. {@code confirmIfPending}이
+     * {@code expires_at > :now}를 WHERE에 넣어서, 둘 중 한쪽만 예약 상태를 바꿀 수 있고
+     * 좌석 전이도 그 쪽만 수행한다.
+     * <p>
+     * native 쿼리라 JPA Auditing이 적용되지 않아 updated_at을 직접 넣는다.
+     * 반환값은 <b>반환된 좌석 수</b>이며, 만료된 예약 건수와는 다르다(한 예약이 여러 좌석을 가진다).
      */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
@@ -81,13 +90,14 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long>,
             WITH expired AS (
                 UPDATE reservations SET status = 'EXPIRED', updated_at = :now
                 WHERE status = 'PENDING' AND expires_at <= :now
-                RETURNING ticket_grade_id, quantity
-            ), restored AS (
-                SELECT ticket_grade_id, SUM(quantity) AS qty FROM expired GROUP BY ticket_grade_id
+                RETURNING id
             )
-            UPDATE ticket_grades tg
-            SET remaining_quantity = tg.remaining_quantity + r.qty, updated_at = :now
-            FROM restored r WHERE tg.id = r.ticket_grade_id
+            UPDATE schedule_seats ss
+            SET status = 'AVAILABLE', reservation_id = NULL, updated_at = :now
+            FROM reservation_seats rs
+            WHERE rs.schedule_seat_id = ss.id
+              AND rs.reservation_id IN (SELECT id FROM expired)
+              AND ss.reservation_id = rs.reservation_id
             """, nativeQuery = true)
     int expirePendingReservations(@Param("now") Instant now);
 }
