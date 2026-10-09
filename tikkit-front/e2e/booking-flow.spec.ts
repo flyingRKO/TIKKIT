@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-// 회원가입 → 로그인 → 공연 선택 → 선점 → 결제 → 예매 내역 → 취소까지 한 번에 확인하는 핵심 시나리오.
+// 회원가입 → 로그인 → 공연 선택 → 좌석 선택 → 선점 → 결제 → 예매 내역 → 취소까지 한 번에 확인하는 핵심 시나리오.
 // 실제 BE(dev 프로필, 시드 데이터 포함)가 떠 있어야 한다. 공연 id는 시드 날짜에 따라 달라질 수 있어서 고정하지 않는다.
 // 매번 새 회원으로 가입하므로 같은 등급 PENDING 중복 선점(409)에 걸리지 않고, 마지막에 취소해서 재고를 되돌린다.
 
-test("가입 → 로그인 → 선점 → 결제 → 취소 흐름", async ({ page }) => {
+test("가입 → 로그인 → 좌석 선택 → 선점 → 결제 → 취소 흐름", async ({ page }) => {
   const runId = Date.now();
   const email = `e2e-${runId}@tikkit.com`;
   const password = "Password1!";
@@ -42,15 +42,34 @@ test("가입 → 로그인 → 선점 → 결제 → 취소 흐름", async ({ pa
     await expect(page).toHaveURL(/\/performances\/\d+$/);
   });
 
-  await test.step("등급을 골라 예매하면 결제 화면으로 이동한다", async () => {
+  await test.step("등급을 고르면 좌석 배치도로 이동한다", async () => {
     // 판매 중인 첫 회차는 기본으로 선택돼 있다. 매진이 아닌(잔여 N석 표시) 첫 등급을 고른다
     const grade = page.getByRole("button", { name: /잔여 \d+석/ }).first();
     await grade.click();
     await expect(grade).toHaveAttribute("aria-pressed", "true");
 
-    await page.getByRole("button", { name: "예매하기" }).click();
+    await page.getByRole("link", { name: "좌석 선택" }).click();
+    // 등급·매수가 쿼리로 넘어간다 (매수는 기본 1매)
+    await expect(page).toHaveURL(
+      /\/performances\/\d+\/schedules\/\d+\/seats\?gradeId=\d+&quantity=1$/
+    );
+  });
+
+  await test.step("좌석을 고르면 결제 화면으로 이동한다", async () => {
+    // 고르기 전에는 제출이 막혀 있다
+    const submit = page.getByRole("button", { name: /골라주세요|예매하기/ });
+    await expect(submit).toBeDisabled();
+
+    // 배치도에서 고를 수 있는 좌석은 role="checkbox"다
+    await page.getByRole("checkbox").first().click();
+    await expect(page.getByText("선택한 좌석 1/1")).toBeVisible();
+    await expect(submit).toBeEnabled();
+
+    await submit.click();
     await expect(page).toHaveURL(/\/booking\/\d+$/);
     await expect(page.getByRole("heading", { name: "결제하기", level: 1 })).toBeVisible();
+    // 고른 자리가 주문 요약에 그대로 나온다
+    await expect(page.locator("section").filter({ hasText: "주문 요약" })).toContainText(/\d+열 \d+번/);
   });
 
   await test.step("모의 결제를 마치면 완료 화면이 뜬다", async () => {

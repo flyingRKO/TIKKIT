@@ -493,9 +493,9 @@ CHECK가 자동으로 사라졌고, `schedule_seats` 복합 FK가 의존하는
 - **좌석맵 조회가 10.7 ms / 400 KB다.** dev 규모에서 그렇고, Task 027 목표 규모에서는 `seats`
   테이블도 훨씬 커진다. 좌표는 공연장마다 고정이라 상태와 분리해 캐시할 수 있지만, 배치도 화면이
   없는 상태에서 미리 쪼개면 추측이 된다.
-- **`pickAvailableSeatIds`는 한시적 코드다.** Task 023에서 사라져야 한다. 남아 있으면 "사용자가
-  고른 좌석"과 "서버가 고른 좌석" 두 경로가 공존하게 된다. 선점 직전에 좌석 400 KB를 한 번 더
-  조회하는 왕복도 그때 없어진다.
+- ~~**`pickAvailableSeatIds`는 한시적 코드다.**~~ → **Task 023에서 제거됐다.** 사용자가 배치도에서
+  고른 `seatIds`를 폼으로 보내므로 "서버가 고른 좌석" 경로가 없어졌고, 선점 직전 좌석 400 KB
+  재조회 왕복도 함께 사라졌다.
 - **`schedule_seats.reservation_id` FK의 multixact 오버헤드를 못 봤다.** 선점 UPDATE마다 부모
   `reservations` 행에 `FOR KEY SHARE` 락이 잡히고, 좌석 4개면 같은 부모에 네 번 걸린다. 이번 실측
   규모에서는 드러나지 않았다 — Task 027에서 봐야 한다.
@@ -505,13 +505,27 @@ CHECK가 자동으로 사라졌고, `schedule_seats` 복합 FK가 의존하는
   `seats` + `schedule_seats`인데 PRD "MVP 제외 범위"에 관리자 기능이 빠져 있다. `V1_1`·`V4_1`·`V5_1`이
   공연장 좌석 정의의 유일한 소스다.
 - **열당 좌석 수(소규모 20 / 대규모 40)와 "VIP가 무대에 가깝다"는 자체 판단이다.** PRD·ERD에 근거가
-  없다. Task 023 화면을 보고 조정할 수 있다.
+  없다. Task 023에서 배치도를 그려 본 결과 모양 자체는 자연스러웠고, 시드는 그대로 뒀다.
 
 ## 13. 다음 단계
 
-[Task 023: 좌석 배치도 화면](../ROADMAP.md) — `GET /schedules/{id}/seats`가 내려주는
-`posX`/`posY`로 배치도를 그리고, 사용자가 고른 `seatIds`를 폼으로 보낸다. `pickAvailableSeatIds`가
-그때 사라진다. 응답 크기(400 KB)와 평면 배열 형식이 실제로 쓰기 좋은지도 그때 판정된다.
+~~[Task 023: 좌석 배치도 화면](../ROADMAP.md)~~ — **완료.** `posX`/`posY`를 SVG `viewBox` 좌표로
+그대로 쓰고, 사용자가 고른 `seatIds`를 hidden input 여러 개로 보낸다.
+
+이 문서가 남긴 두 질문의 답:
+
+- **평면 배열 형식은 쓰기 좋았다.** 구역별 중첩이 필요 없었다 — 배치도는 좌표로 그리고,
+  구역 이름은 `section`별 좌표 범위를 한 번 순회해 역산하면 된다. 중첩했다면 오히려 그 구조를
+  다시 펼쳐야 했다. 다만 `grade`/`price`가 없어서 FE가 `ticketGradeId`로 등급 목록과 조인한다
+  (등급이 4개뿐이라 Map 조회가 싸고, 좌석 3,000개에 `"VIP"` 문자열을 반복해 내려받는 것보다 낫다).
+- **응답 크기 400 KB는 이번 규모에서 문제가 되지 않았다.** Server Component가 받아 RSC payload로
+  넘기고, 클릭 → DOM 반영이 5~8ms다. 다만 이건 3,000석 기준이고 Task 027의 대량 데이터에서
+  다시 판정해야 한다.
+
+새로 생긴 후속 과제는 `GET /reservations/{id}` 상세에 좌석 목록이 추가된 것이다 —
+`reservation_seats` → `schedule_seats` → `seats` 3홉 조인을 쓴다. `schedule_seats.reservation_id`로
+바로 가는 1홉 경로를 안 쓴 이유는 그 컬럼에 인덱스가 없고(HOT 보존), **취소하면 null이 되어
+"내가 어느 자리였는지"가 사라지기** 때문이다. append-only로 둔 설계가 기능이 된 셈이다.
 
 [Task 027: 부하 테스트](../ROADMAP.md) — `schedule_seats` 약 600만 행에서 HOT 비율, 좌석맵 조회,
 multixact 오버헤드를 다시 잰다. `V7` 인덱스 추가 여부가 그 측정으로 결정된다. 이번 문서의 8절이
