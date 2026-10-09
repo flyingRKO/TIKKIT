@@ -48,6 +48,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -531,6 +532,47 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.content", hasSize(1)))
                 .andExpect(jsonPath("$.data.content[0].id").value(pendingId));
+    }
+
+    @Test
+    @DisplayName("예매 상세는 고른 좌석을 배치도 순서로 내려준다")
+    void 예매상세_좌석_조회() throws Exception {
+        // given: 좌석 id를 일부러 거꾸로 넣어서 선점한다
+        // 응답 정렬이 "요청 순서"가 아니라 "좌표 순서(posY, posX)"임을 확인하려는 것이다.
+        MockHttpSession session = loginAsNewMember("seatviewer@tikkit.com");
+        List<Long> seatIds = new ArrayList<>(nextSeats(2));
+        Collections.reverse(seatIds);
+        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), seatIds);
+        clearPersistenceContext();
+
+        // when & then: createAvailableSeats가 posX = seatNumber로 좌석을 만들므로 1번 -> 2번 순서여야 한다
+        mockMvc.perform(get("/api/v1/reservations/{id}", reservationId).session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.quantity").value(2))
+                .andExpect(jsonPath("$.data.seats", hasSize(2)))
+                .andExpect(jsonPath("$.data.seats[0].section").value("VIP-중"))
+                .andExpect(jsonPath("$.data.seats[0].rowLabel").value("1"))
+                .andExpect(jsonPath("$.data.seats[0].seatNumber").value(1))
+                .andExpect(jsonPath("$.data.seats[1].seatNumber").value(2));
+    }
+
+    @Test
+    @DisplayName("취소된 예매도 상세에서 받았던 좌석을 그대로 보여준다")
+    void 취소된_예매_좌석_조회() throws Exception {
+        // reservation_seats는 append-only라 취소해도 행이 남는다 (ReservationSeat Javadoc).
+        // "취소된 예매가 어느 자리였는지"를 사용자가 계속 볼 수 있어야 한다.
+        MockHttpSession session = loginAsNewMember("seatcanceller@tikkit.com");
+        Long reservationId = reserveViaApi(session, onSaleSchedule.getId(), onSaleGrade.getId(), nextSeats(1));
+        clearPersistenceContext();
+
+        mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(session))
+                .andExpect(status().isOk());
+        clearPersistenceContext();
+
+        mockMvc.perform(get("/api/v1/reservations/{id}", reservationId).session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.data.seats", hasSize(1)));
     }
 
     /** 회차에 예매 가능 좌석을 만들고 schedule_seats id 목록을 돌려준다. */

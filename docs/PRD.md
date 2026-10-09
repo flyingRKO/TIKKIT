@@ -100,7 +100,7 @@ journey
 | `/my/reservations` | 내 예매 목록 |
 | `/my/reservations/[id]` | 예매 상세 |
 
-고도화 단계에서 `/performances/[id]/schedules/[scheduleId]/seats`(좌석 선택, Phase 6), `/queue/[scheduleId]`(대기열, Phase 9)가 추가된다.
+`/performances/[id]/schedules/[scheduleId]/seats`(좌석 선택)는 Phase 6(Task 023)에서 추가됐다. 공연 상세에서 회차·등급·매수를 고르면 `?gradeId=&quantity=`를 달고 이 화면으로 이동하고, 여기서 좌석을 골라 선점한다. `/queue/[scheduleId]`(대기열, Phase 9)가 추가될 예정이다.
 
 ## 부록 B: API (`/api/v1`)
 
@@ -112,10 +112,11 @@ journey
 | GET | /members/me | ✔ | |
 | GET | /performances?category&keyword&status&page&size | – | PageResponse |
 | GET | /performances/{id} | – | 회차 목록 포함 |
-| GET | /schedules/{id}/ticket-grades | – | 실시간 잔여 수량 |
-| POST | /reservations | ✔ | `{scheduleId, ticketGradeId, quantity}` → 201 PENDING + expiresAt |
+| GET | /schedules/{id}/ticket-grades | – | 실시간 잔여 수량 (지정석 전환 후 좌석 AVAILABLE 건수로 파생, Task 022) |
+| GET | /schedules/{id}/seats | – | 좌석 배치도. 평면 배열, `ORDER BY posY, posX` (Task 022) |
+| POST | /reservations | ✔ | `{scheduleId, ticketGradeId, quantity, seatIds}` → 201 PENDING + expiresAt. `seatIds`는 `schedule_seats.id`이고 개수가 `quantity`와 다르면 400 (Task 022) |
 | GET | /reservations?status&page | ✔ | 본인 예약만 조회 |
-| GET | /reservations/{id} | ✔ | 소유자 검증 |
+| GET | /reservations/{id} | ✔ | 소유자 검증. 받은 좌석 목록 `seats` 포함 (Task 023) |
 | POST | /reservations/{id}/payments | ✔ | `{method}` → CONFIRMED. 선점 만료 후 요청 시 409 `RESERVATION_EXPIRED` |
 | POST | /reservations/{id}/cancel | ✔ | → CANCELLED (CONFIRMED는 공연 24시간 전까지만 가능, 재고 복원·결제 REFUNDED) |
 

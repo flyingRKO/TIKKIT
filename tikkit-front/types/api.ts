@@ -164,6 +164,14 @@ export interface ReservationSummaryResponse {
   status: ReservationStatus;
 }
 
+// 예약이 받은 좌석 (Task 023). 상세 응답에만 있고 목록 응답에는 없다 —
+// 목록 N건마다 좌석 조인이 돌면 N+1이 되고, 목록에서는 매수만 보여주면 된다.
+export interface ReservationSeatResponse {
+  section: string;
+  rowLabel: string;
+  seatNumber: number;
+}
+
 export type PaymentMethod = "CARD" | "KAKAO_PAY" | "BANK_TRANSFER";
 export type PaymentStatus = "PAID" | "REFUNDED";
 
@@ -188,6 +196,7 @@ export interface ReservationDetailResponse {
   expiresAt: string | null;
   confirmedAt: string | null;
   cancelledAt: string | null;
+  seats: ReservationSeatResponse[];
   payment: PaymentResponse | null;
 }
 

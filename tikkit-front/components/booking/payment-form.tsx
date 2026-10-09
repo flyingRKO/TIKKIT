@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { CountdownTimer } from "@/components/booking/countdown-timer";
 import { FormError } from "@/components/layout/form-error";
+import { StickyCta } from "@/components/layout/sticky-cta";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { payReservationAction } from "@/lib/actions/reservation";
 import {
@@ -66,8 +67,8 @@ export function PaymentForm({ reservationId, totalAmount, initialRemainingMs }: 
         <p className="text-xs text-muted-foreground">모의 결제입니다. 실제로 금액이 청구되지 않습니다.</p>
       </fieldset>
 
-      {/* 모바일은 화면 하단에 고정, md 이상은 폼 아래에 그대로 둔다. 페이지 쪽에서 pb로 자리를 비워둔다 */}
-      <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-3 border-t bg-background p-4 md:static md:z-auto md:border-t md:bg-transparent md:px-0 md:pb-0">
+
+      <StickyCta>
         <FormError message={state.error} />
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">결제 금액</span>
@@ -82,7 +83,7 @@ export function PaymentForm({ reservationId, totalAmount, initialRemainingMs }: 
             {pending ? "결제 중..." : `${totalAmount.toLocaleString("ko-KR")}원 결제하기`}
           </Button>
         )}
-      </div>
+      </StickyCta>
     </form>
   );
 }

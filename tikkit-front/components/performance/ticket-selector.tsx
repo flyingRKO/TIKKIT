@@ -1,36 +1,23 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { FormError } from "@/components/layout/form-error";
-import { Button } from "@/components/ui/button";
-import { createReservationAction } from "@/lib/actions/reservation";
-import { initialReservationActionState } from "@/lib/actions/reservation-state";
+import Link from "next/link";
+import { useState } from "react";
+import { StickyCta } from "@/components/layout/sticky-cta";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format-date";
 import { GRADE_LABELS } from "@/lib/performance-labels";
+import { getSaleState, MAX_QUANTITY } from "@/lib/schedule-rules";
 import { cn, focusRing } from "@/lib/utils";
 import type { ScheduleSummaryResponse, TicketGradeResponse } from "@/types/api";
 
-const MAX_QUANTITY = 4;
-
-type SaleState = "BEFORE_OPEN" | "OPEN" | "CLOSED";
-
-// 회차별 판매 기간 판단. 화면에서 미리 막아주는 용도일 뿐이고, 최종 판단은 BE(BOOKING_NOT_OPEN)가 한다.
-function getSaleState(schedule: ScheduleSummaryResponse, now: number): SaleState {
-  if (now < new Date(schedule.bookingOpenAt).getTime()) return "BEFORE_OPEN";
-  if (now >= new Date(schedule.bookingCloseAt).getTime()) return "CLOSED";
-  return "OPEN";
-}
-
 interface TicketSelectorProps {
   performanceId: number;
-  performanceTitle: string;
   schedules: ScheduleSummaryResponse[];
   ticketGradesBySchedule: Record<number, TicketGradeResponse[]>;
 }
 
 export function TicketSelector({
   performanceId,
-  performanceTitle,
   schedules,
   ticketGradesBySchedule,
 }: TicketSelectorProps) {
@@ -41,10 +28,6 @@ export function TicketSelector({
   );
   const [gradeId, setGradeId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
-  const [state, formAction, pending] = useActionState(
-    createReservationAction,
-    initialReservationActionState
-  );
 
   const selectedSchedule = schedules.find((schedule) => schedule.id === scheduleId) ?? null;
   const grades = scheduleId ? ticketGradesBySchedule[scheduleId] ?? [] : [];
@@ -54,6 +37,13 @@ export function TicketSelector({
     selectedSchedule !== null &&
     selectedGrade !== null &&
     getSaleState(selectedSchedule, now) === "OPEN";
+
+  // 선점은 좌석 선택 화면에서 일어난다. 등급·매수를 쿼리에 실어 보내면
+  // 새로고침·뒤로가기·로그인 복귀에도 그 선택이 남는다.
+  const seatsHref =
+    selectedSchedule && selectedGrade
+      ? `/performances/${performanceId}/schedules/${selectedSchedule.id}/seats?gradeId=${selectedGrade.id}&quantity=${quantity}`
+      : "";
 
   function handleSelectSchedule(nextScheduleId: number) {
     setScheduleId(nextScheduleId);
@@ -71,15 +61,7 @@ export function TicketSelector({
   }
 
   return (
-    <form action={formAction} className="flex flex-col gap-5 rounded-xl border p-4">
-      <input type="hidden" name="performanceId" value={performanceId} />
-      <input type="hidden" name="performanceTitle" value={performanceTitle} />
-      <input type="hidden" name="scheduleId" value={scheduleId ?? ""} />
-      <input type="hidden" name="showAt" value={selectedSchedule?.showAt ?? ""} />
-      <input type="hidden" name="ticketGradeId" value={gradeId ?? ""} />
-      <input type="hidden" name="grade" value={selectedGrade?.grade ?? ""} />
-      <input type="hidden" name="quantity" value={quantity} />
-
+    <div className="flex flex-col gap-5 rounded-xl border p-4">
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold">회차 선택</h2>
         <div className="flex flex-col gap-1.5">
@@ -136,7 +118,9 @@ export function TicketSelector({
                 >
                   <span>{GRADE_LABELS[grade.grade]}</span>
                   <span className="text-muted-foreground">
-                    {soldOut ? "매진" : `${grade.price.toLocaleString()}원 · 잔여 ${grade.remainingQuantity}석`}
+                    {soldOut
+                      ? "매진"
+                      : `${grade.price.toLocaleString()}원 · 잔여 ${grade.remainingQuantity}석`}
                   </span>
                 </button>
               );
@@ -176,17 +160,22 @@ export function TicketSelector({
         </section>
       )}
 
-      {/* 모바일은 화면 하단에 고정하고, md 이상에서는 카드 안에 그대로 둔다 */}
-      <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-3 border-t bg-background p-4 md:static md:z-auto md:border-t md:bg-transparent md:px-0 md:pb-0">
-        <FormError message={state.error} />
+      <StickyCta>
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">합계</span>
           <span className="text-lg font-bold">{totalPrice.toLocaleString()}원</span>
         </div>
-        <Button type="submit" disabled={!canBook || pending} className="w-full" size="lg">
-          {pending ? "선점 중..." : "예매하기"}
-        </Button>
-      </div>
-    </form>
+        {canBook ? (
+          <Link href={seatsHref} className={cn(buttonVariants({ size: "lg" }), "w-full")}>
+            좌석 선택
+          </Link>
+        ) : (
+          // 비활성 링크는 만들 수 없어서 버튼으로 둔다. 회차·등급을 고르면 Link로 바뀐다.
+          <Button type="button" size="lg" className="w-full" disabled>
+            좌석 선택
+          </Button>
+        )}
+      </StickyCta>
+    </div>
   );
 }

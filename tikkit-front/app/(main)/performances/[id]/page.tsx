@@ -62,7 +62,6 @@ export default async function PerformanceDetailPage({
       <div className="w-full md:w-80">
         <TicketSelector
           performanceId={performance.id}
-          performanceTitle={performance.title}
           schedules={performance.schedules}
           ticketGradesBySchedule={ticketGradesBySchedule}
         />

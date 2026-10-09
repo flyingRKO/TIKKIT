@@ -32,3 +32,16 @@ export const CATEGORY_OPTIONS: PerformanceCategory[] = [
 ];
 
 export const STATUS_OPTIONS: PerformanceStatus[] = ["UPCOMING", "ON_SALE", "CLOSED"];
+
+/**
+ * "VIP석 중앙 1열 3번". 배치도의 좌석 aria-label, 선택 요약, 주문 요약이 같은 문구를 쓴다.
+ *
+ * 좌석맵 모듈이 아니라 여기 둔 이유: 배치도를 안 그리는 화면(결제·예매 상세)도 쓰기 때문이다.
+ */
+export function formatSeatLabel(seat: {
+  section: string;
+  rowLabel: string;
+  seatNumber: number;
+}): string {
+  return `${seat.section} ${seat.rowLabel}열 ${seat.seatNumber}번`;
+}

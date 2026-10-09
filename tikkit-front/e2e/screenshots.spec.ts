@@ -55,6 +55,20 @@ test("README용 주요 화면 캡처", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
   });
 
+  await test.step("좌석 배치도", async () => {
+    await page.getByRole("link", { name: "좌석 선택" }).click();
+    await expect(page).toHaveURL(/\/seats\?/);
+    // 좌석을 골라서 요약 패널이 채워진 상태로 찍는다
+    await page.getByRole("checkbox").first().click();
+    await page.getByRole("checkbox").nth(1).click();
+    await expect(page.getByText("선택한 좌석 2/2")).toBeVisible();
+    await capture(page, "04-seat-map.png", { fullPage: true });
+
+    await page.setViewportSize(MOBILE);
+    await capture(page, "05-seat-map-mobile.png");
+    await page.setViewportSize(DESKTOP);
+  });
+
   let bookingUrl = "";
   await test.step("결제 화면", async () => {
     await page.getByRole("button", { name: "예매하기" }).click();
@@ -62,20 +76,20 @@ test("README용 주요 화면 캡처", async ({ page }) => {
     bookingUrl = page.url();
     await expect(page.getByRole("heading", { name: "결제하기", level: 1 })).toBeVisible();
     // 결제 버튼이 폼 맨 아래라서 전체 높이로 찍는다
-    await capture(page, "04-booking-payment.png", { fullPage: true });
+    await capture(page, "06-booking-payment.png", { fullPage: true });
   });
 
   await test.step("결제 완료 화면", async () => {
     await page.getByLabel("카카오페이").check();
     await page.getByRole("button", { name: /원 결제하기$/ }).click();
     await expect(page.getByRole("heading", { name: "예매가 완료되었습니다" })).toBeVisible();
-    await capture(page, "05-booking-complete.png");
+    await capture(page, "07-booking-complete.png");
   });
 
   await test.step("예매 내역", async () => {
     await page.getByRole("link", { name: "예매 내역 보기" }).click();
     await expect(page.getByRole("heading", { name: "내 예매 내역" })).toBeVisible();
-    await capture(page, "06-my-reservations.png", { fullPage: true });
+    await capture(page, "08-my-reservations.png", { fullPage: true });
   });
 
   await test.step("정리: 방금 만든 예약을 취소해 재고를 되돌린다", async () => {

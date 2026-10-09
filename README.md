@@ -10,7 +10,7 @@
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
-API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시켜 유지했기 때문에, 재고의 원천이 뒤집혔는데도 화면은 그대로입니다. 다음은 **Task 023(좌석 배치도 화면)** — `posX`/`posY`로 배치도를 그리고 사용자가 좌석을 직접 고르게 합니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시켜 유지했기 때문에, 재고의 원천이 뒤집혔는데도 화면은 그대로였습니다. **Task 023(좌석 배치도 화면)** 에서 `posX`/`posY`로 SVG 배치도를 그려 사용자가 좌석을 직접 고르게 했고, 서버가 대신 앞자리를 집어주던 한시적 코드(`pickAvailableSeatIds`)가 사라졌습니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 스크린샷
 
@@ -18,9 +18,13 @@ API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시�
 |---|---|---|
 | <img src="docs/images/01-home.png" alt="메인 화면"> | <img src="docs/images/02-performance-detail.png" alt="공연 상세 화면"> | <img src="docs/images/03-performance-detail-mobile.png" alt="모바일 공연 상세 화면"> |
 
-| 결제 | 예매 완료 | 예매 내역 |
+| 좌석 배치도 | 좌석 배치도 (모바일 360px) | 결제 |
 |---|---|---|
-| <img src="docs/images/04-booking-payment.png" alt="결제 화면"> | <img src="docs/images/05-booking-complete.png" alt="예매 완료 화면"> | <img src="docs/images/06-my-reservations.png" alt="예매 내역 화면"> |
+| <img src="docs/images/04-seat-map.png" alt="좌석 배치도 화면"> | <img src="docs/images/05-seat-map-mobile.png" alt="모바일 좌석 배치도 화면"> | <img src="docs/images/06-booking-payment.png" alt="결제 화면"> |
+
+| 예매 완료 | 예매 내역 |
+|---|---|
+| <img src="docs/images/07-booking-complete.png" alt="예매 완료 화면"> | <img src="docs/images/08-my-reservations.png" alt="예매 내역 화면"> |
 
 스크린샷은 `npm run screenshots`로 다시 만들 수 있습니다 ([E2E 테스트](#e2e-테스트) 참고). 포스터 이미지는 시드 데이터에 URL이 없어서 placeholder로 표시됩니다.
 

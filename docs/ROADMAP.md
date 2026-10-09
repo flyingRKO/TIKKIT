@@ -193,7 +193,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `v0.2.0-concurrency` 태그 생성 (PR #16 머지 후 main의 `c64f7a2`에 주석 태그로 생성. 커밋 8개를 머지 커밋으로 보존했다 — `003` 문서가 삭제한 측정 코드를 커밋 SHA로 참조하므로 squash하면 재현 방법이 깨진다)
   - 알려진 한계: 결론은 **단일 DB 전제**에서만 유효하다 — DB를 샤딩하거나 DB 밖 자원(외부 API 쿼터, 파일)을 보호해야 하면 분산 락 외에 선택지가 없다. Testcontainers Redis는 같은 호스트 루프백이라 **측정된 Redis 오버헤드는 하한**이다(운영은 0.5~2ms). 단일 인스턴스를 썼으므로 Redlock 논쟁은 범위 밖이다. 인덱스는 `PENDING`만 제한하므로 같은 회원의 `CONFIRMED` 중복은 여전히 허용된다(의도된 동작). `DataIntegrityViolationException` 일반 매핑은 아직 500이다(`uk_reservations_reservation_no`, `uk_payments_reservation_id`). 측정은 로컬 Docker 기준이라 **방식 간 상대 비교**로만 읽어야 한다
 
-### Phase 6: 지정석 전환
+### Phase 6: 지정석 전환 ✅
 
 - **Task 021: [공통] 지정석 스키마 설계 및 확장 마이그레이션** ✅ - 완료
   - ✅ `docs/ERD.md`에 지정석 델타 반영 (seats, schedule_seats, reservation_seats — venues는 V1에 이미 있음). 2절에 설계가 선반영돼 있어서 ERD가 비워둔 구체 수치와 제약만 채웠다
@@ -229,11 +229,24 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ 검증: 백엔드 테스트 129개 통과, e2e 3개 통과, 깨끗한 DB에서 V1~V6 전체 체인 재검증(좌석 7,120 / 회차좌석 26,894 / 구역 12종)
   - **원문 정정**: "좌석 중복 선점이 `uk_schedule_seats_schedule_seat`를 때리면 409로 가린다"는 **해당 없다.** 선점은 UPDATE라 그 UNIQUE를 때릴 수 없고, `reservation_seats`의 UNIQUE는 `distinct()` 정규화가 애초에 막는다. 영원히 안 타는 `catch`를 넣지 않았다. 자동 생성 CHECK 이름에 의존하지 않는다는 원칙은 유효하며, `status`를 enum으로 넘겨 위반 자체가 불가능하게 했다
   - 알려진 한계: **`pickAvailableSeatIds`가 한시적 코드다** — Task 023에서 제거해야 하고, 남으면 "사용자가 고른 좌석"과 "서버가 고른 좌석" 두 경로가 공존한다. 선점 직전 좌석 400 KB를 한 번 더 조회하는 왕복도 그때 없어진다. **HOT 측정 표본이 6건**이라 경향만 본 것이고 Task 027에서 다시 재야 한다. **좌석맵 조회가 10.7 ms / 400 KB**로 잔여석 COUNT보다 13배 비싸다 — 원인은 `seats` 전체 Seq Scan과 정렬이라 V7에서 볼 것은 `idx(schedule_id, status)`가 아니다. `schedule_seats.reservation_id` FK의 `FOR KEY SHARE` multixact 오버헤드는 이번 규모에서 드러나지 않았다. `SeatBackfillMigrationTest`를 삭제했다 — V5가 `total_quantity`를 읽어서 V6 이후 재실행이 불가능하다. 지속 가치가 있는 불변식 5개는 `ReservationApiIntegrationTest.좌석_불변식`으로 옮겼다. 열당 좌석 수(20/40)와 "VIP가 무대에 가깝다"는 여전히 PRD·ERD 근거가 없는 자체 판단이다
-- **Task 023: [FE] 좌석 배치도 화면**
-  - 등급별 색상이 표시되는 SVG/그리드 좌석 배치도
-  - 최대 4석 선택, 요약 패널
-  - 409 응답 시 배치도 재조회 및 안내, 모바일 확대/스크롤 대응
-  - `v0.3.0-seatmap` 태그
+- **Task 023: [FE] 좌석 배치도 화면** ✅ - 완료
+  - ✅ **별도 라우트 `/performances/[id]/schedules/[scheduleId]/seats`**(PRD 부록 A에 계획돼 있던 경로). 상세의 `md:w-80` 사이드 패널에는 배치도가 안 들어가고, 무엇보다 `apiFetch`가 서버 전용(`API_BASE_URL`에 `NEXT_PUBLIC_` 없음)이라 **Server Component가 좌석을 받는 구조여야 409 재조회를 위한 클라이언트 경로를 새로 만들지 않아도 된다**. 등급·매수는 `?gradeId=&quantity=`로 넘겨 새로고침·뒤로가기·로그인 복귀에도 살아남는다
+  - ✅ **매수를 먼저 고르고 배치도에서 그만큼 선택**하는 흐름. BE가 `seatIds.size() != quantity`를 400으로 끊으므로 둘 중 하나를 진실로 정해야 했고, 기존 `TicketSelector`의 매수 UI를 살리는 쪽이 변경 범위가 작다
+  - ✅ 404와 리다이렉트를 갈랐다 — 회차가 그 공연 것이 아니면 `notFound()`(없는 리소스), 등급·매수가 어긋나면 상세로 `redirect()`(회차는 존재하고 다시 고르면 되는 상황). 404로 뭉개면 "공연이 사라졌나" 싶게 된다
+  - ✅ **SVG `<rect>`로 렌더.** `posX`에 구역 사이 통로만큼 값이 비어 있어서(V5 백필) 좌표를 그대로 그리면 통로가 공짜로 생긴다. CSS grid는 좌석마다 `grid-column`을 지정해야 하고 노드도 더 무겁다. 등급 색은 Task 003에서 미리 심어둔 `--grade-vip/r/s/a` 토큰을 Tailwind v4 `@theme` 매핑으로 `fill-grade-*`로 쓴다
+  - ✅ **등급이 바뀌는 줄 앞에만 가로 통로를 넣었다**(`rowY` 맵). `posY`가 등급 구분 없이 1씩 이어져서 단순 곱셈으로 y를 계산하면 구역 이름이 윗 등급 마지막 줄 좌석과 겹친다. 실제 공연장도 등급 사이에 통로가 있어 모양까지 자연스러워졌다
+  - ✅ **고를 수 없는 좌석 레이어를 `memo`로 끊었다.** React Compiler가 꺼져 있어(`next.config.ts` 비어 있음) 자동 메모이제이션이 없고, 안 끊으면 좌석 하나 누를 때마다 3,000개 rect를 다시 만든다. 실측 **클릭 → DOM 반영 5~8ms**(3,000석)
+  - ✅ **roving tabindex 추가**(계획에 없던 항목). 좌석마다 `tabIndex={0}`을 주면 키보드 사용자가 요약 패널까지 가는 데 150번(A석이면 1,200번) Tab을 눌러야 한다. 탭 스톱은 하나만 두고 ←→로 좌석 간, ↑↓로 같은 `posX`에 가장 가까운 윗/아랫줄로 옮긴다. `focusRing`(`ring-2`)은 box-shadow라 SVG에 안 먹어서 `outline`을 직접 지정했다
+  - ✅ 최대 4석(BE `@Size(max = 4)`와 같은 값). **매수가 찬 뒤 다른 좌석을 누르면 무시하고 안내**한다 — 먼저 고른 좌석을 밀어내면 누른 적 없는 자리가 조용히 풀려서 예매에서는 위험하다
+  - ✅ 확대 3단계(전체/보통/확대)와 `overflow-auto` 스크롤. 제스처 라이브러리는 도입하지 않았다. 360px에서 **가로 넘침 0px**
+  - ✅ **409 재조회**: `SOLD_OUT`/`NOT_FOUND`는 둘 다 "화면의 좌석 정보가 낡았다"는 같은 상황이라 함께 묶어 `revalidatePath(좌석 경로)` + 선택 비우기로 처리한다. 선택 초기화 신호는 `resetSeatsAt: number`(타임스탬프) — boolean이면 같은 실패가 연속될 때 값이 안 바뀌어 두 번째를 감지할 수 없다. 초기화는 `useEffect`가 아니라 **렌더 중 상태 조정**으로 한다(effect로 하면 낡은 선택이 한 프레임 보이고, `react-hooks/set-state-in-effect` lint에도 걸린다). **`router.refresh()`는 필요 없었다** — `revalidatePath`만으로 배치도가 다시 내려오는 것을 2개 브라우저 컨텍스트로 실측 확인
+  - ✅ **`pickAvailableSeatIds` 제거 — Task 022의 필수 후속 해소.** 선점 직전 좌석 400 KB 재조회 왕복도 함께 사라졌다
+  - ✅ **범위 추가: `GET /reservations/{id}` 상세 응답에 좌석 목록.** 자리를 골랐는데 결제·예매상세에 안 보이는 불일치를 막는다. 조회는 `reservation_seats` → `schedule_seats` → `seats` 3홉 조인 — `schedule_seats.reservation_id`로 바로 가는 1홉 경로는 HOT 보존을 위해 인덱스를 안 걸었고(Task 021), **취소하면 null이 되어 "내가 어느 자리였는지"가 사라진다**. 목록 응답은 건드리지 않았다(N건마다 좌석 조인 → N+1)
+  - ✅ `OrderSummary` 한 곳만 고쳐 결제·완료·예매상세 **세 화면**이 함께 해결됐다. 좌석 DTO에 `price`를 넣지 않은 이유: 한 예약=한 등급이라 `unitPrice`와 같은 값이 반복되고 "좌석별 차등 가격이 있다"는 오해를 준다
+  - ✅ 하단 고정 CTA가 세 번째 복붙이 될 자리라 `components/layout/sticky-cta.tsx`로 추출, `getSaleState`도 `lib/schedule-rules.ts`로 분리(좌석 페이지와 `TicketSelector`가 공유)
+  - ✅ 검증: BE 테스트 123개, e2e 3개(좌석 선택 step 추가), 360px·다크모드·키보드 이동, 프로덕션 빌드. **스크린샷 8장으로 갱신**(배치도 데스크톱·모바일 추가)
+  - ✅ `v0.3.0-seatmap` 태그
+  - 알려진 한계: **Server Component가 좌석 전체(3,000석 약 400 KB)를 한 번에 내려준다** — Task 027/030에서 측정해 구역 단위 분할이나 BE 필터 파라미터를 검토한다. 배치도 **확대는 버튼 3단계**이고 핀치 줌은 없다. `findInAdjacentRow`는 선택 가능한 좌석만 훑으므로 **다른 등급 줄을 건너뛴다**(의도된 동작이지만 시각적 위치와 어긋날 수 있다). 좌석 `aria-label`에 상태(선점/판매완료)가 없다 — 고를 수 없는 좌석은 접근성 트리에서 아예 빼는 쪽을 택했다. **열당 좌석 수(20/40)와 "VIP가 무대에 가깝다"는 여전히 PRD·ERD 근거가 없는 자체 판단**이고, 배치도를 그려 본 결과 모양은 자연스러웠다
 
 ### Phase 7: 운영 기반
 
@@ -319,5 +332,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-08
-**📊 진행 상황**: Phase 6 진행 중 — Task 021~022 완료, Task 023 진행 예정 (22/34 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-09
+**📊 진행 상황**: Phase 6 완료 — Task 021~023 완료, 다음은 Phase 7 Task 024(컨테이너화·CD) (23/34 Tasks 완료)

@@ -16,6 +16,7 @@ import com.tikkit.api.domain.reservation.dto.PaymentRequest;
 import com.tikkit.api.domain.reservation.dto.PaymentResponse;
 import com.tikkit.api.domain.reservation.dto.ReservationCreateRequest;
 import com.tikkit.api.domain.reservation.dto.ReservationDetailResponse;
+import com.tikkit.api.domain.reservation.dto.ReservationSeatResponse;
 import com.tikkit.api.domain.reservation.dto.ReservationResponse;
 import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
@@ -188,12 +189,15 @@ public class ReservationService {
                 .map(this::toPaymentResponse)
                 .orElse(null);
 
+        // 좌석은 1:N이라 예약 본문과 한 쿼리로 합치지 않는다 (ReservationRepositoryCustom.findSeats Javadoc 참조).
+        List<ReservationSeatResponse> seats = reservationRepository.findSeats(reservation.getId());
+
         return new ReservationDetailResponse(
                 reservation.getId(), reservation.getReservationNo(),
                 reservation.getSchedule().getPerformance().getTitle(), reservation.getSchedule().getShowAt(),
                 reservation.getTicketGrade().getGrade(), reservation.getQuantity(), reservation.getUnitPrice(),
                 reservation.getTotalAmount(), reservation.getStatus(), reservation.getExpiresAt(),
-                reservation.getConfirmedAt(), reservation.getCancelledAt(), payment);
+                reservation.getConfirmedAt(), reservation.getCancelledAt(), seats, payment);
     }
 
     /**

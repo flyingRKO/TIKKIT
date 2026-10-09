@@ -5,11 +5,15 @@ import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.tikkit.api.domain.performance.entity.QPerformance;
 import com.tikkit.api.domain.performance.entity.QSchedule;
+import com.tikkit.api.domain.performance.entity.QScheduleSeat;
 import com.tikkit.api.domain.performance.entity.QTicketGrade;
+import com.tikkit.api.domain.reservation.dto.ReservationSeatResponse;
 import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.QReservation;
+import com.tikkit.api.domain.reservation.entity.QReservationSeat;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
+import com.tikkit.api.domain.venue.entity.QSeat;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -27,6 +31,9 @@ public class ReservationRepositoryImpl implements ReservationRepositoryCustom {
     private static final QSchedule schedule = QSchedule.schedule;
     private static final QPerformance performance = QPerformance.performance;
     private static final QTicketGrade ticketGrade = QTicketGrade.ticketGrade;
+    private static final QReservationSeat reservationSeat = QReservationSeat.reservationSeat;
+    private static final QScheduleSeat scheduleSeat = QScheduleSeat.scheduleSeat;
+    private static final QSeat seat = QSeat.seat;
 
     @Override
     public Page<ReservationSummaryResponse> searchMine(Long memberId, ReservationStatus status, Pageable pageable) {
@@ -65,6 +72,21 @@ public class ReservationRepositoryImpl implements ReservationRepositoryCustom {
                 .where(reservation.id.eq(id), reservation.member.id.eq(memberId))
                 .fetchOne();
         return Optional.ofNullable(result);
+    }
+
+    @Override
+    public List<ReservationSeatResponse> findSeats(Long reservationId) {
+        // 정렬 기준은 좌석맵 조회(ScheduleSeatRepositoryImpl)와 같은 posY, posX다.
+        // rowLabel이 varchar라 문자열 정렬하면 "10열"이 "2열"보다 앞에 오므로 좌표로 정렬한다.
+        return queryFactory
+                .select(Projections.constructor(ReservationSeatResponse.class,
+                        seat.section, seat.rowLabel, seat.seatNumber))
+                .from(reservationSeat)
+                .join(reservationSeat.scheduleSeat, scheduleSeat)
+                .join(scheduleSeat.seat, seat)
+                .where(reservationSeat.reservation.id.eq(reservationId))
+                .orderBy(seat.posY.asc(), seat.posX.asc())
+                .fetch();
     }
 
     private BooleanExpression statusEq(ReservationStatus status) {
