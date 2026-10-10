@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.4.5'
+    id 'org.springframework.boot' version '4.1.1'
     id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -25,7 +25,8 @@ repositories {
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-web'
+    // Boot 4에서 spring-boot-starter-web이 -webmvc로 개명됐다 (WebFlux와 이름을 대칭시킨 것)
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-security'
 
@@ -37,38 +38,46 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
 
     // Flyway (스키마 마이그레이션)
-    implementation 'org.flywaydb:flyway-core'
+    // Boot 4부터는 flyway-core를 직접 넣는 방식이 지원되지 않고 스타터가 필수다.
+    // 스타터는 flyway-core까지만 가져오고 DB별 모듈은 가져오지 않는다 — 빼면 기동이
+    // `FlywayException: Unsupported Database: PostgreSQL 15.x`로 깨진다(의존성 누락인데
+    // 메시지는 DB 버전 문제처럼 읽힌다).
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
-    // QueryDSL (Jakarta EE 10 / Spring Boot 3.x 호환 - jakarta 분류자 필수)
+    // QueryDSL (Jakarta EE 11 / Spring Boot 4.x 호환 - jakarta 분류자 필수)
+    // Hibernate 7이 Jakarta Persistence 3.2를 쓰므로 jakarta 분류자가 아니면 동작하지 않는다.
     implementation 'com.querydsl:querydsl-jpa:5.1.0:jakarta'
     annotationProcessor 'com.querydsl:querydsl-apt:5.1.0:jakarta'
     annotationProcessor 'jakarta.annotation:jakarta.annotation-api'
     annotationProcessor 'jakarta.persistence:jakarta.persistence-api'
 
-    // MyBatis (통계/리포트/배치/벤더 특화 SQL용)
-    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.4'
+    // MyBatis (통계/리포트/배치/벤더 특화 SQL용). 4.1.x가 Spring Boot 4.1 대응 라인이다.
+    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.1.0'
 
-    // springdoc-openapi (Spring Boot 3.4용 2.x 계열 마지막 버전 - Boot 4용은 3.x 계열로 별도)
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6'
+    // springdoc-openapi (Spring Boot 4용은 3.x 계열. 2.x는 Boot 3 전용이라 올려야 한다)
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1'
 
     // Redisson (Redis 클라이언트). Task 020 분산 락 비교 실험에서 도입하고
     // Task 029(캐싱)·031(대기열)에서 계속 쓴다. redisson-spring-boot-starter를 쓰지 않은 이유는
     // docs/improvements/003-redis-distributed-lock.md 참조 — 자동설정이 기동 시점에 즉시 연결해서
     // Redis가 없으면 컨텍스트 기동 자체가 깨진다.
-    implementation 'org.redisson:redisson:3.50.0'
+    // 4.x로 올린 이유: 3.50.0은 netty 4.1을 요구하는데 Boot 4가 관리하는 netty는 4.2다.
+    implementation 'org.redisson:redisson:4.8.0'
 
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.springframework.security:spring-security-test'
-    testImplementation 'org.assertj:assertj-core:3.24.2'
-    testImplementation 'org.mockito:mockito-core:5.8.0'
-    testImplementation 'org.mockito:mockito-junit-jupiter:5.8.0'
+    // Boot 4에서 테스트 지원이 기술별 스타터로 쪼개졌다. spring-boot-starter-test는
+    // 이 스타터들이 전이 의존으로 끌고 오므로 따로 선언하지 않는다.
+    // AssertJ·Mockito도 버전을 고정하지 않고 BOM에 맡긴다 (고정하면 JUnit 버전과 어긋날 수 있다).
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     // Testcontainers (레포지토리/통합 테스트용 실제 PostgreSQL)
+    // 2.0에서 아티팩트명이 testcontainers-<module> 꼴로 전부 바뀌었다.
+    // @Testcontainers JUnit 확장을 쓰지 않고 AbstractContainerTest가 수동 싱글턴으로 띄우므로
+    // testcontainers-junit-jupiter는 넣지 않는다.
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
-    testImplementation 'org.testcontainers:junit-jupiter'
-    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
 }
 
 tasks.named('test') {
