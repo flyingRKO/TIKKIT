@@ -142,7 +142,7 @@ model: sonnet
 
 ### ⚙️ 백엔드
 
-- **Spring Boot 3.4.5** - REST API 서버
+- **Spring Boot 4.1.1** - REST API 서버
 - **Java 21** - 백엔드 언어
 - **Spring Data JPA** - ORM
 - **QueryDSL** - 타입 안전 동적 쿼리
@@ -163,12 +163,12 @@ model: sonnet
 2. **사용자 관점**: 기술적 구현이 아닌 사용자가 사용하는 기능 중심
 3. **즉시 개발 가능**: 개발자가 이 문서만 보고 바로 코딩 시작할 수 있는 수준
 4. **MVP 범위**: 프로젝트 성공에 반드시 필요한 최소 기능만 포함
-5. **최신 기술**: 반드시 현재 최신 버전 명시 (Next.js 16, Spring Boot 3.4.5 등)
+5. **최신 기술**: 반드시 현재 최신 버전 명시 (Next.js 16, Spring Boot 4.1.1 등)
 
 ## 🔧 기술 스택 선택 원칙
 
 - **프론트엔드**: Next.js 16 + TypeScript + TailwindCSS v4 (TIKKIT 기본 스택)
-- **백엔드**: Spring Boot 3.4.5 + Java 21 + JPA + QueryDSL + MyBatis (TIKKIT 기본 스택)
+- **백엔드**: Spring Boot 4.1.1 + Java 21 + JPA + QueryDSL + MyBatis (TIKKIT 기본 스택)
 - **데이터베이스**: PostgreSQL 15 (Docker로 로컬 실행)
 - **인증**: Spring Security + JWT 토큰 방식
 

@@ -10,12 +10,12 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 | 영역 | 기술 | 도입 시점 |
 |---|---|---|
-| 백엔드 | Spring Boot 3.4.5, Java 21, JPA, QueryDSL 5.1.0, MyBatis 3.0.4 | 기존 |
-| 스키마 관리 | Flyway (flyway-core, flyway-database-postgresql) | Task 002 |
-| 테스트 DB | Testcontainers PostgreSQL (H2 대체) | Task 002 |
-| API 문서 | springdoc-openapi | Task 006 |
+| 백엔드 | Spring Boot 4.1.1, Java 21, JPA(Hibernate 7.4), QueryDSL 5.1.0, MyBatis 4.1.0 | Task 026_1 (3.4.5에서 올림) |
+| 스키마 관리 | Flyway 12 (spring-boot-starter-flyway + flyway-database-postgresql) | Task 002, 026_1 |
+| 테스트 DB | Testcontainers 2.0 PostgreSQL (H2 대체) | Task 002, 026_1 |
+| API 문서 | springdoc-openapi 3.1.1 | Task 006, 026_1 |
 | 인증 | Spring Security (세션 기반, in-memory HttpSession) | Task 008 |
-| 캐시/락/대기열 | Redis + Redisson | Task 020, 029, 031 |
+| 캐시/락/대기열 | Redis 7 + Redisson 4.8.0 | Task 020, 029, 031 |
 | 모니터링 | Actuator + Micrometer + Prometheus + Grafana | Task 025 |
 | 세션 확장 검증 | Spring Session Data Redis vs JWT 비교 | Task 026 |
 | 부하 테스트 | k6 | Task 027 |
@@ -252,15 +252,22 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 
 Phase 7~9는 전부 로컬 Docker로 재현·측정한다. 클라우드 VM이 필요한 배포·CD는 Phase 10(Task 034)으로 분리했다.
 
-- **Task 026_1: [BE] Spring Boot 4 업그레이드**
-  - Spring Boot 3.4.5 → 4.1.x. 3.4 라인의 OSS 보안 패치가 2025-12-31에 끊겼고 3.5도 2026-06-30에 끝나서, 패치를 받는 라인은 4.0/4.1뿐이다
-  - **Phase 7 맨 앞에 두는 이유**: 뒤따르는 Task 024(Dockerfile base image·레이어 추출 방식)·025(Actuator 엔드포인트와 Micrometer 지표 이름)·026(세션 설정)이 전부 Boot 버전에 묶여 있다. 3.4에서 먼저 만들면 업그레이드 때 같은 자리를 두 번 손대고 측정치도 다시 뽑아야 한다
-  - 동시에 올라가는 메이저: Spring Framework 6.2→7.0, Hibernate 6.6→7.4, Spring Security 6.4→7.1, Jackson 2→3(패키지 이동), netty 4.1→4.2(Redisson도 4.x 필요), springdoc 2.x→3.x. QueryDSL 5.1.0은 그대로다
-  - 영향 범위 실측(Task 020 시점): Jackson 직접 사용 6파일(`ApiResponse`의 `@JsonInclude`, security 핸들러 2개의 `ObjectMapper`, 통합 테스트 3개), `nativeQuery = true` 2파일(`ReservationRepository`의 만료 CTE, `PerformanceRepository`의 파생값 재계산), security 설정 5파일
-  - **Hibernate 7에서 native 쿼리와 벌크 UPDATE 동작이 바뀌는지 먼저 확인한다** — Phase 5(Task 019)의 조건부 UPDATE와 Phase 6(Task 022)의 다중행 조건부 UPDATE·데이터 변경 CTE가 전부 거기 걸려 있다. `@Modifying(flushAutomatically = true)`의 flush 시점과 영향 행 수 반환이 핵심 검증 대상
-  - 업그레이드 후 Task 019·020·**022**의 동시성 측정을 재실행해 수치가 유지되는지 확인한다 (초과 판매 차단 10건, 좌석당 1명, 겹치는 좌석 집합 데드락 0건·부분 선점 0건, 중복 선점 1건, 결제-만료 경쟁)
-  - 완료 시 이 문서 "기술 스택" 표의 백엔드 행을 `Spring Boot 4.1.x`로 갱신하고 도입 시점에 `Task 026_1`을 적는다
-  - 마이그레이션 과정을 `docs/improvements/`에 기록
+- **Task 026_1: [BE] Spring Boot 4 업그레이드** ✅ - 완료
+  - ✅ Spring Boot 3.4.5 → **4.1.1** (Framework 7.0.8 / Hibernate 7.4.5 / Jackson 3.1.5). 3.4 라인의 OSS 보안 패치가 2025-12-31에 끊겼고 3.5도 2026-06-30에 끝나서, 패치를 받는 라인은 4.0/4.1뿐이다. Java 21 유지(Boot 4는 17+ 요구)
+  - ✅ **Phase 7 맨 앞에 둔 이유**: 뒤따르는 Task 024(Dockerfile base image)·025(Actuator 엔드포인트와 Micrometer 지표명)·026(세션 설정)이 전부 Boot 버전에 묶여 있다. 3.4에서 먼저 만들면 같은 자리를 두 번 손대고 측정치도 다시 뽑아야 한다
+  - ✅ **Hibernate 7 관문 통과** — 조건부 UPDATE 7개의 영향 행 수 반환이 Boot 3.4와 동일하다. `@Modifying(flushAutomatically = true, clearAutomatically = true)`의 flush 시점도 유지된다. 깨지지 않은 이유는 **조건부 UPDATE를 전부 원시 SQL/JPQL로 직접 쓰고 ORM의 상태 관리를 안 믿도록 설계**했기 때문이다 — Task 019가 엔티티에서 상태 변경 메서드를 삭제한 결정이 Hibernate 변경에 대한 노출 면적을 줄여놨다. Hibernate 7이 실제로 바꾼 것(native 쿼리 날짜 타입 `java.sql`→`java.time`, `@Immutable` 벌크 UPDATE 예외)은 우리가 쓰지 않는 기능이다
+  - ✅ **파괴적 변경 3건이 컴파일을 통과한다** — 이 Task의 핵심 발견. (1) springdoc 3.1.1이 swagger-core 2.2.55를 통해 **Jackson 2를 클래스패스에 남겨서** 구 `ObjectMapper` import가 컴파일된다(기동 시점에 "빈이 없다"로 터진다). (2) `testcontainers-postgresql-2.0.5.jar`가 `org/testcontainers/containers/PostgreSQLContainer.class`를 **호환용으로 남겨둔다**. (3) `asText()`는 `asString()`에 위임하는 final 메서드로 남아 deprecated 경고만 낸다. 그래서 **`-Xlint:deprecation`을 명시적으로 켜는 게 실질적 안전망**이었다(init 스크립트는 `allprojects {}`로 감싸야 한다 — `tasks.withType`만 쓰면 빌드가 실패하는데 그걸 "경고 없음"으로 오독할 수 있다)
+  - ✅ **함정: `spring-boot-starter-flyway`는 DB 모듈을 안 가져온다.** 기동이 `FlywayException: Unsupported Database: PostgreSQL 15.18`로 깨졌는데 **실제 원인은 의존성 누락**이고 메시지가 그걸 가린다. 스타터는 `flyway-core`까지만 가져오므로 `flyway-database-postgresql`을 따로 명시해야 한다
+  - ✅ **Jackson 3가 필드 순서를 바꾼다** — Jackson 2는 선언 순서, Jackson 3는 creator 파라미터 먼저 + 나머지 알파벳순. `ApiResponse`는 `{data, success}`로, `PageResponse`는 생성자 파라미터명이 `page`라서 `page`가 맨 앞으로 갔다. **응답 DTO 17개는 전부 record라 안 바뀌었고** 순서를 라이브러리 기본값에 맡기던 클래스가 딱 2개(공통 래퍼)였다. 전역으로 `SORT_PROPERTIES_ALPHABETICALLY`를 끄는 대신 **두 클래스에 `@JsonPropertyOrder`를 명시**했다 — 전역 설정은 "선언 순서에 암묵적으로 의존"하는 상태로 되돌아가는 것이고 그게 방금 우리를 문 그 의존이다
+  - ✅ 빌드 전환: Gradle 8.13 → **8.14.4**(Boot 4 플러그인 최소 요구. 최신 9.8.1 대신 8.x 마지막을 골라 "Gradle 9인가 Boot 4인가"를 분리할 필요를 없앴다), `starter-web` → **`starter-webmvc`**, 테스트는 **`starter-webmvc-test` + `starter-data-jpa-test`**(기술별로 쪼개짐), Testcontainers 좌표 **`testcontainers-postgresql`**(2.0 전면 개명), Redisson **4.8.0**(3.50.0은 netty 4.1, Boot 4는 4.2 관리), MyBatis starter **4.1.0**, springdoc **3.1.1**, `spring-security-test` 제거(실사용 0건), AssertJ·Mockito 버전 고정 해제
+  - ✅ 패키지 이동: `@AutoConfigureMockMvc`가 `boot.test.autoconfigure.web.servlet` → **`boot.webmvc.test.autoconfigure`**(5파일, **유일하게 컴파일러가 잡아준 변경**), `findValuesAsText()` → `findValuesAsString()`, `asText()` → `asString()`
+  - ✅ **Testcontainers 변경이 1파일에 갇혔다** — 테스트 11개가 `AbstractContainerTest`를 import하고 Testcontainers를 직접 import하는 건 그 베이스 클래스뿐이다. Task 002의 "공통 베이스 테스트 클래스" 결정이 라이브러리 메이저 업그레이드 비용을 1파일로 묶어줬다
+  - ✅ **조사에서 해당 없음으로 판정된 Boot 4 파괴적 변경**: `@MockBean`/`@SpyBean` 제거(사용 0건), `@SpringBootTest`의 MockMvc 자동 구성 중단(5곳 전부 이미 `@AutoConfigureMockMvc` 명시), `@EntityScan` 패키지 이동·`spring.jackson.*` 키 이동(미사용), `starter-aop`→`-aspectj`(Task 020에서 이미 제거). **스프링 테스트 지원 기능을 적게 쓴 쪽이 업그레이드 비용으로 돌아왔다**
+  - ✅ 로드맵이 Task 020 시점에 적은 영향 범위는 과소 추정이었다 — Task 022가 코드를 늘려서 `nativeQuery`는 2파일이 아니라 **3파일 5개**, Jackson 직접 사용은 6파일이 아니라 **7파일**이다
+  - ✅ 검증: 테스트 **123개 통과**(실패 0 / 에러 0 / 건너뜀 0), e2e **3개 통과**(FE 무수정), 동시성 수치 전부 유지(초과 판매 201 10건/409 90건, 중복 선점 1/19, 겹치는 좌석 집합 데드락 0·부분 선점 0, 좌석당 1명, 결제-만료 경쟁+보상 환불), **좌석맵 응답 408,705 bytes 바이트 단위 동일**, 좌석맵 쿼리 플랜 동일, `schedule_seats` HOT **100%** 유지, 기동 4.42초
+  - ✅ 새 경고: `SpringDoc /swagger-ui.html endpoint is enabled by default`(springdoc 3.x 신규). 운영 비활성화는 **Task 024에서 처리**
+  - ✅ `docs/improvements/004_1-spring-boot-4-migration.md` 작성. `005`~`010`에 이름이 예약된 Task들을 밀지 않으려고 서브번호 관행(`V3_1`, `V4_1`, `Task 026_1`)을 따랐다
+  - 알려진 한계: **Jackson 2와 3이 한 JVM에 공존한다**(swagger-core가 Jackson 2를 쓰는 동안 그대로. 현재 증상은 없다). **HOT 측정 표본이 3건**이라 경향만 본 것이고 Task 027에서 다시 재야 한다. 좌석맵 DB 쿼리 3.15~3.55 ms는 **004 문서의 플랜 설명을 보고 재구성한 동등 쿼리** 측정이라 before 10.70 ms와 직접 비교할 수 없다 — 유효한 결론은 "플랜 모양이 같다"까지다. **한 번에 올렸으므로 "무엇이 무엇을 깨뜨렸나"를 diff로 가를 수 없다**(3.5.x 경유를 안 골랐다). Gradle은 8.14.4에 머물러 있고 9.x 전환은 별도 건이다
   - 번호를 `027`이 아니라 `026_1`로 붙인 이유: Task 027~033이 ERD 마이그레이션 이력과 기술 스택 표에서 참조되고 있어 번호를 밀면 여러 곳을 같이 고쳐야 한다 (마이그레이션에서 `V4` 대신 `V3_1`을 쓴 것과 같은 이유)
 - **Task 024: [공통] 컨테이너화 및 로컬 운영 스택**
   - BE layered-jar Dockerfile, FE `output: 'standalone'` Dockerfile
@@ -349,4 +356,4 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 ---
 
 **📅 최종 업데이트**: 2026-10-10
-**📊 진행 상황**: Phase 6 완료 — Task 021~023 완료, 다음은 Phase 7 Task 026_1(Spring Boot 4 업그레이드). 비용이 드는 배포·CD는 Task 034로 떼어내 Phase 10으로 미뤘다 (23/35 Tasks 완료)
+**📊 진행 상황**: Phase 7 진행 중 — Task 026_1(Spring Boot 4.1.1 업그레이드) 완료, 다음은 Task 024(컨테이너화·로컬 운영 스택). 비용이 드는 배포·CD는 Task 034로 떼어내 Phase 10으로 미뤘다 (24/35 Tasks 완료)

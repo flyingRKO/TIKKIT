@@ -76,7 +76,7 @@ color: red
 | 영역 | 기술 | 버전 |
 |------|------|------|
 | 프론트엔드 | Next.js (App Router) | 16.2.3 |
-| 백엔드 | Spring Boot | 3.4.5 |
+| 백엔드 | Spring Boot | 4.1.1 |
 | 언어 (BE) | Java | 21 |
 | DB | PostgreSQL | 15 |
 

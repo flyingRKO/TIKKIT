@@ -1,6 +1,5 @@
 package com.tikkit.api.integration.reservation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.domain.payment.entity.PaymentMethod;
 import com.tikkit.api.domain.reservation.dto.PaymentRequest;
 import com.tikkit.api.domain.reservation.dto.ReservationCreateRequest;
@@ -19,6 +18,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -85,7 +85,7 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
     @Autowired
     private MockMvc mockMvc;
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper jsonMapper;
     @Autowired
     private ReservationRepository reservationRepository;
     @Autowired
@@ -457,17 +457,17 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         MvcResult result = mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(createRequest(fixture, seatIds))))
+                        .content(jsonMapper.writeValueAsString(createRequest(fixture, seatIds))))
                 .andReturn();
         assertThat(result.getResponse().getStatus()).as("선점이 성공했다").isEqualTo(201);
-        return objectMapper.readTree(result.getResponse().getContentAsString()).at("/data/id").asLong();
+        return jsonMapper.readTree(result.getResponse().getContentAsString()).at("/data/id").asLong();
     }
 
     private int pay(MockHttpSession session, Long reservationId) throws Exception {
         return mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andReturn().getResponse().getStatus();
     }
 
@@ -494,10 +494,10 @@ class ReservationConcurrencyTest extends AbstractConcurrencyTest {
         MvcResult result = mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(createRequest(fixture, seatIds))))
+                        .content(jsonMapper.writeValueAsString(createRequest(fixture, seatIds))))
                 .andReturn();
         String body = result.getResponse().getContentAsString();
-        return new Response(result.getResponse().getStatus(), objectMapper.readTree(body).path("code").asText());
+        return new Response(result.getResponse().getStatus(), jsonMapper.readTree(body).path("code").asString());
     }
 
     /** 선점 응답을 201 성공 / 409(기대한 에러 코드) 거절 / 그 외로 분류한다. */

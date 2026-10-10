@@ -4,7 +4,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * 레포지토리·통합 테스트 공통 베이스.
@@ -14,8 +14,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @ActiveProfiles("test")
 public abstract class AbstractContainerTest {
 
-    private static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:15")
+    private static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer("postgres:15")
                     .withDatabaseName("tikkit_test")
                     .withUsername("tikkit_test")
                     .withPassword("tikkit_test");

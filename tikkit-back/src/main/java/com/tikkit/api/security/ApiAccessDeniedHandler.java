@@ -1,6 +1,5 @@
 package com.tikkit.api.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.common.exception.ErrorCode;
 import com.tikkit.api.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 
@@ -20,7 +20,7 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class ApiAccessDeniedHandler implements AccessDeniedHandler {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
@@ -28,6 +28,6 @@ public class ApiAccessDeniedHandler implements AccessDeniedHandler {
         response.setStatus(ErrorCode.FORBIDDEN.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.error(ErrorCode.FORBIDDEN)));
+        response.getWriter().write(jsonMapper.writeValueAsString(ApiResponse.error(ErrorCode.FORBIDDEN)));
     }
 }
