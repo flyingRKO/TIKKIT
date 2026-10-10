@@ -1,6 +1,7 @@
 package com.tikkit.api.common.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.tikkit.api.common.exception.ErrorCode;
 import lombok.Builder;
 import lombok.Getter;
@@ -9,9 +10,16 @@ import java.util.List;
 
 /**
  * 모든 API 응답을 감싸는 공통 포맷: {success, data, code, message, errors}.
+ *
+ * <p>Jackson 3는 필드 선언 순서를 쓰지 않고 creator 파라미터를 먼저, 나머지는 알파벳순으로
+ * 직렬화한다(Jackson 2의 기본값과 다르다). 이 클래스는 record가 아니라 순서를 정의로 고정할 수
+ * 없으므로 {@code @JsonPropertyOrder}로 위 포맷을 명시한다. 응답 DTO 17개는 모두 record여서
+ * 컴포넌트 순서가 그대로 유지되고, 순서를 라이브러리 기본값에 맡기는 클래스는 이것과
+ * {@link PageResponse}뿐이다.
  */
 @Getter
 @JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonPropertyOrder({"success", "data", "code", "message", "errors"})
 public class ApiResponse<T> {
 
     private final boolean success;

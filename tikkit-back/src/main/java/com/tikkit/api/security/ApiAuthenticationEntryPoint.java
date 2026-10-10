@@ -1,6 +1,5 @@
 package com.tikkit.api.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.common.exception.ErrorCode;
 import com.tikkit.api.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 
@@ -21,7 +21,7 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
@@ -29,6 +29,6 @@ public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
         response.setStatus(ErrorCode.UNAUTHORIZED.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.error(ErrorCode.UNAUTHORIZED)));
+        response.getWriter().write(jsonMapper.writeValueAsString(ApiResponse.error(ErrorCode.UNAUTHORIZED)));
     }
 }
