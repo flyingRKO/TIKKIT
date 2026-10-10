@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**지정석 전환 완료 — Phase 0~5 완료 + Phase 6 BE 완료, 22/34 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
+**지정석 전환 완료 — Phase 0~6 완료, 23/35 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
@@ -137,7 +137,7 @@ MVP 완성 이후 아래 항목을 순서대로 진행하며, 각 단계는 `doc
 - **성능 최적화**: k6 부하 테스트로 병목을 찾고 인덱스·캐싱 전후 수치 비교
 - **대기열 시스템**: Redis 기반 대기열로 오픈런 트래픽 대응
 
-자세한 내용은 [`docs/ROADMAP.md`](docs/ROADMAP.md)의 Phase 5~9를 참고하세요.
+자세한 내용은 [`docs/ROADMAP.md`](docs/ROADMAP.md)의 Phase 5~10을 참고하세요.
 
 ## 동시성 제어: 초과 판매 차단 (해결됨)
 

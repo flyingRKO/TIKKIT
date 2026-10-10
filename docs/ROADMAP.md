@@ -248,26 +248,33 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - ✅ `v0.3.0-seatmap` 태그
   - 알려진 한계: **Server Component가 좌석 전체(3,000석 약 400 KB)를 한 번에 내려준다** — Task 027/030에서 측정해 구역 단위 분할이나 BE 필터 파라미터를 검토한다. 배치도 **확대는 버튼 3단계**이고 핀치 줌은 없다. `findInAdjacentRow`는 선택 가능한 좌석만 훑으므로 **다른 등급 줄을 건너뛴다**(의도된 동작이지만 시각적 위치와 어긋날 수 있다). 좌석 `aria-label`에 상태(선점/판매완료)가 없다 — 고를 수 없는 좌석은 접근성 트리에서 아예 빼는 쪽을 택했다. **열당 좌석 수(20/40)와 "VIP가 무대에 가깝다"는 여전히 PRD·ERD 근거가 없는 자체 판단**이고, 배치도를 그려 본 결과 모양은 자연스러웠다
 
-### Phase 7: 운영 기반
+### Phase 7: 운영 기반 (로컬)
 
-- **Task 024: [공통] 컨테이너화 및 CD**
+Phase 7~9는 전부 로컬 Docker로 재현·측정한다. 클라우드 VM이 필요한 배포·CD는 Phase 10(Task 034)으로 분리했다.
+
+- **Task 026_1: [BE] Spring Boot 4 업그레이드**
+  - Spring Boot 3.4.5 → 4.1.x. 3.4 라인의 OSS 보안 패치가 2025-12-31에 끊겼고 3.5도 2026-06-30에 끝나서, 패치를 받는 라인은 4.0/4.1뿐이다
+  - **Phase 7 맨 앞에 두는 이유**: 뒤따르는 Task 024(Dockerfile base image·레이어 추출 방식)·025(Actuator 엔드포인트와 Micrometer 지표 이름)·026(세션 설정)이 전부 Boot 버전에 묶여 있다. 3.4에서 먼저 만들면 업그레이드 때 같은 자리를 두 번 손대고 측정치도 다시 뽑아야 한다
+  - 동시에 올라가는 메이저: Spring Framework 6.2→7.0, Hibernate 6.6→7.4, Spring Security 6.4→7.1, Jackson 2→3(패키지 이동), netty 4.1→4.2(Redisson도 4.x 필요), springdoc 2.x→3.x. QueryDSL 5.1.0은 그대로다
+  - 영향 범위 실측(Task 020 시점): Jackson 직접 사용 6파일(`ApiResponse`의 `@JsonInclude`, security 핸들러 2개의 `ObjectMapper`, 통합 테스트 3개), `nativeQuery = true` 2파일(`ReservationRepository`의 만료 CTE, `PerformanceRepository`의 파생값 재계산), security 설정 5파일
+  - **Hibernate 7에서 native 쿼리와 벌크 UPDATE 동작이 바뀌는지 먼저 확인한다** — Phase 5(Task 019)의 조건부 UPDATE와 Phase 6(Task 022)의 다중행 조건부 UPDATE·데이터 변경 CTE가 전부 거기 걸려 있다. `@Modifying(flushAutomatically = true)`의 flush 시점과 영향 행 수 반환이 핵심 검증 대상
+  - 업그레이드 후 Task 019·020·**022**의 동시성 측정을 재실행해 수치가 유지되는지 확인한다 (초과 판매 차단 10건, 좌석당 1명, 겹치는 좌석 집합 데드락 0건·부분 선점 0건, 중복 선점 1건, 결제-만료 경쟁)
+  - 완료 시 이 문서 "기술 스택" 표의 백엔드 행을 `Spring Boot 4.1.x`로 갱신하고 도입 시점에 `Task 026_1`을 적는다
+  - 마이그레이션 과정을 `docs/improvements/`에 기록
+  - 번호를 `027`이 아니라 `026_1`로 붙인 이유: Task 027~033이 ERD 마이그레이션 이력과 기술 스택 표에서 참조되고 있어 번호를 밀면 여러 곳을 같이 고쳐야 한다 (마이그레이션에서 `V4` 대신 `V3_1`을 쓴 것과 같은 이유)
+- **Task 024: [공통] 컨테이너화 및 로컬 운영 스택**
   - BE layered-jar Dockerfile, FE `output: 'standalone'` Dockerfile
-  - `docker-compose.prod.yml`, GitHub Actions로 GHCR 푸시 후 VM에 SSH 배포
-  - 환경변수·시크릿 관리. **배포 대상(EC2/Lightsail/Oracle Free 등)은 착수 시 사용자에게 확인**
+  - `docker-compose.prod.yml` (BE + FE + PostgreSQL + Redis), 로컬 `.env` 기준 환경변수 관리
+  - **완료 기준은 로컬 구동 검증이다** — prod 이미지로 전체 스택을 띄워 Playwright e2e 3개가 통과하는지 확인한다. dev 프로필 기동과 다른 점(Flyway 적용 시점, CORS origin, `output: 'standalone'`의 정적 파일 복사 누락)이 여기서 드러난다
+  - `.github/workflows/ci.yml`에 `docker build` 잡 추가 (**푸시 없이 빌드만**) — Dockerfile이 조용히 썩는 것을 막는다. 레지스트리 푸시와 VM 배포는 Task 034
+  - GitHub Secrets·레지스트리 인증·도메인은 범위 밖 (Task 034)
 - **Task 025: [BE] 모니터링 구축**
   - Actuator + micrometer-prometheus 연동, compose에 Prometheus·Grafana 추가
   - 대시보드: HTTP p95, HikariCP 풀, JVM, 예매 성공/실패 카운터
 - **Task 026: [BE] 다중 인스턴스 세션 불일치 재현 및 개선**
-  - Task 024로 컨테이너화한 BE를 2개 인스턴스로 띄우고 로드밸런서(nginx 등) 뒤에 두어, 세션이 서버 메모리에만 있어 A 서버에서 로그인 후 B 서버로 요청이 가면 로그아웃되는 현상을 재현
+  - Task 024의 `docker-compose.prod.yml`에 **BE 2개 + nginx(로드밸런서)** 를 추가해 **로컬에서** 재현한다. 세션이 서버 메모리에만 있어 A 서버에서 로그인한 뒤 B 서버로 요청이 가면 로그아웃되는 현상. 클라우드가 아니라 로컬 compose로도 같은 현상이 그대로 나오고, 오히려 양쪽 로그를 동시에 보며 측정하기 쉽다
   - Redis 세션(Spring Session Data Redis)과 JWT(stateless) 두 가지 해결책을 각각 적용해보고, Task 025의 Grafana로 응답 지연을 비교하고 강제 로그아웃(권한 회수) 가능 여부·인프라 비용도 함께 따짐
   - 최종 선택과 이유를 `docs/improvements/005-session-scaling.md`에 재현→해결→수치 형식으로 기록, `v0.4.0-ops` 태그
-- **Task 026_1: [BE] Spring Boot 4 업그레이드**
-  - Spring Boot 3.4.5 → 4.1.x. 3.4 라인의 OSS 보안 패치가 2025-12-31에 끊겼고 3.5도 2026-06-30에 끝나서, 패치를 받는 라인은 4.0/4.1뿐이다
-  - 동시에 올라가는 메이저: Spring Framework 6.2→7.0, Hibernate 6.6→7.4, Spring Security 6.4→7.1, Jackson 2→3(패키지 이동), netty 4.1→4.2(Redisson도 4.x 필요), springdoc 2.x→3.x. QueryDSL 5.1.0은 그대로다
-  - 영향 범위 실측(Task 020 시점): Jackson 직접 사용 6파일(`ApiResponse`의 `@JsonInclude`, security 핸들러 2개의 `ObjectMapper`, 통합 테스트 3개), `nativeQuery = true` 2파일(`ReservationRepository`의 만료 CTE, `PerformanceRepository`의 파생값 재계산), security 설정 5파일
-  - **Hibernate 7에서 native 쿼리와 벌크 UPDATE 동작이 바뀌는지 먼저 확인한다** — Phase 5(Task 019)의 조건부 UPDATE가 전부 거기 걸려 있다. `@Modifying(flushAutomatically = true)`의 flush 시점과 영향 행 수 반환이 핵심 검증 대상
-  - 업그레이드 후 Task 019·020의 동시성 측정을 재실행해 수치가 유지되는지 확인하고, 마이그레이션 과정을 `docs/improvements/`에 기록
-  - 번호를 `027`이 아니라 `026_1`로 붙인 이유: Task 027~033이 ERD 마이그레이션 이력과 기술 스택 표에서 참조되고 있어 번호를 밀면 여러 곳을 같이 고쳐야 한다 (마이그레이션에서 `V4` 대신 `V3_1`을 쓴 것과 같은 이유)
 
 ### Phase 8: 성능 개선
 
@@ -303,6 +310,15 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
   - `docs/improvements/010-waiting-queue.md`와 요약 인덱스 `docs/improvements/README.md` 작성
   - README 포트폴리오 섹션 마무리, `v1.0.0` 태그
 
+### Phase 10: 클라우드 배포
+
+- **Task 034: [공통] GHCR 푸시 및 클라우드 배포(CD)**
+  - Task 024의 `docker build` 잡을 **푸시까지 확장** — GitHub Actions가 main 푸시마다 BE/FE 이미지를 GHCR에 올린다 (태그는 커밋 SHA + `latest`)
+  - VM 프로비저닝 후 `docker-compose.prod.yml` 적용, SSH 배포 워크플로우, GitHub Secrets로 시크릿 주입
+  - 도메인·HTTPS(Let's Encrypt), 배포 후 스모크 테스트
+  - **배포 대상은 착수 시 사용자에게 확인한다** — Oracle Cloud Always Free가 비용 0 후보이고 EC2/Lightsail은 과금된다. 포트폴리오 제출 기간에만 띄우고 내리는 운영도 선택지다
+  - **비용이 발생하는 유일한 Task라서 의도적으로 맨 끝에 뒀다.** Phase 7~9는 전부 로컬 Docker로 재현·측정하므로 이 Task 없이도 `docs/improvements/` 기록은 완결된다. 별도 태그를 붙이지 않는다 (배포는 기능이 아니라 운영이고, `v1.0.0`은 Phase 9의 기능 완성에 붙는다)
+
 ## 브랜드 디자인 토큰 (Task 003 적용)
 
 퍼플을 `primary`, 강한 핑크를 별도 `--highlight` 토큰으로 분리한다. shadcn의 `--accent`는 hover 배경으로 쓰이므로 강한 핑크를 넣으면 과해져, 옅은 핑크 틴트로 둔다.
@@ -332,5 +348,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-09
-**📊 진행 상황**: Phase 6 완료 — Task 021~023 완료, 다음은 Phase 7 Task 024(컨테이너화·CD) (23/34 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-10
+**📊 진행 상황**: Phase 6 완료 — Task 021~023 완료, 다음은 Phase 7 Task 026_1(Spring Boot 4 업그레이드). 비용이 드는 배포·CD는 Task 034로 떼어내 Phase 10으로 미뤘다 (23/35 Tasks 완료)
