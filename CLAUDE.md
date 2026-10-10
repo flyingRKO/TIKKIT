@@ -20,9 +20,9 @@ TIKKIT/
 - **상세 가이드**: `@/tikkit-front/CLAUDE.md` 참조
 
 ### 백엔드 (`tikkit-back/`)
-- **Framework**: Spring Boot 3.4.5
+- **Framework**: Spring Boot 4.1.1
 - **Language**: Java 21
-- **ORM**: Spring Data JPA / Hibernate + QueryDSL + MyBatis (통계·리포트·배치용)
+- **ORM**: Spring Data JPA / Hibernate 7 + QueryDSL + MyBatis (통계·리포트·배치용)
 - **Database**: PostgreSQL 15 (Docker)
 - **상세 가이드**: `@/tikkit-back/CLAUDE.md` 참조
 

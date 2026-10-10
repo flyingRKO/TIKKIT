@@ -4,16 +4,16 @@
 
 | 기술 | 버전 | 용도 |
 |------|------|------|
-| Spring Boot | 3.4.5 | 메인 애플리케이션 프레임워크 |
+| Spring Boot | 4.1.1 | 메인 애플리케이션 프레임워크 |
 | Java | 21 | 백엔드 언어 |
-| Spring Data JPA | - | ORM / 데이터 접근 레이어 |
+| Spring Data JPA | Hibernate 7.4 | ORM / 데이터 접근 레이어 |
 | QueryDSL | 5.1.0 (jakarta) | 타입 안전 동적 쿼리 |
-| MyBatis | 3.x | 통계/배치/벤더 특화 SQL |
+| MyBatis | 4.1.0 (starter) | 통계/배치/벤더 특화 SQL |
 | Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
-| Spring Web | - | REST API |
+| Spring Web | - | REST API (`spring-boot-starter-webmvc`) |
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
 | Redis | 7 | 캐시·대기열 (Task 020 도입, `REDIS_ENABLED=true`일 때만 연결) |
-| Redisson | 3.50.0 | Redis 클라이언트 |
+| Redisson | 4.8.0 | Redis 클라이언트 |
 | Lombok | - | 보일러플레이트 코드 감소 |
 | JUnit 5 | - | 테스트 프레임워크 |
 

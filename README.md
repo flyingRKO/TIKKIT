@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**지정석 전환 완료 — Phase 0~6 완료, 23/35 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
+**지정석 전환 완료 + Spring Boot 4 업그레이드 — Phase 0~6 완료 & Phase 7 진행 중, 24/35 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
@@ -34,14 +34,14 @@ API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시�
 |---|---|
 | [`docs/PRD.md`](docs/PRD.md) | MVP 요구사항, 기능 명세, API 계약 |
 | [`docs/ERD.md`](docs/ERD.md) | DB 스키마, 정규화·동시성·마이그레이션 설계 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0~9, Task 001~033 개발 로드맵 |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0~10, Task 001~034 개발 로드맵 |
 
 ## 기술 스택
 
 | 영역 | 기술 |
 |---|---|
 | 프론트엔드 | Next.js 16.2.3 (App Router), React 19.2.4, TypeScript 5, TailwindCSS v4 |
-| 백엔드 | Spring Boot 3.4.5, Java 21, Spring Data JPA + QueryDSL + MyBatis |
+| 백엔드 | Spring Boot 4.1.1, Java 21, Spring Data JPA(Hibernate 7.4) + QueryDSL + MyBatis |
 | 데이터베이스 | PostgreSQL 15 (Docker), Flyway |
 | 캐시·대기열 | Redis 7 + Redisson (Task 020 도입, `REDIS_ENABLED=true`일 때만 사용) |
 | 테스트·CI | JUnit 5 + Testcontainers (BE), Playwright (E2E), GitHub Actions |

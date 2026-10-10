@@ -85,7 +85,7 @@ journey
 
 ## 기술 스택
 
-프론트엔드(Next.js 16.2.3 + React 19.2.4 + TypeScript 5 + Tailwind v4)와 백엔드(Spring Boot 3.4.5 + Java 21 + JPA/QueryDSL + PostgreSQL 15) 모두 루트 `CLAUDE.md`와 각 하위 `CLAUDE.md`의 컨벤션을 따른다. MVP에 새로 도입되는 요소(Flyway, springdoc, Spring Security)는 `docs/ROADMAP.md` 기술 스택 표에 도입 시점과 함께 정리되어 있다.
+프론트엔드(Next.js 16.2.3 + React 19.2.4 + TypeScript 5 + Tailwind v4)와 백엔드(Spring Boot 4.1.1 + Java 21 + JPA/QueryDSL + PostgreSQL 15) 모두 루트 `CLAUDE.md`와 각 하위 `CLAUDE.md`의 컨벤션을 따른다. MVP에 새로 도입되는 요소(Flyway, springdoc, Spring Security)는 `docs/ROADMAP.md` 기술 스택 표에 도입 시점과 함께 정리되어 있다.
 
 ## 부록 A: 라우트
 
