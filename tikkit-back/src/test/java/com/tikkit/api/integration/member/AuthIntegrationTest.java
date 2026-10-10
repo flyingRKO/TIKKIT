@@ -1,17 +1,17 @@
 package com.tikkit.api.integration.member;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.domain.member.dto.LoginRequest;
 import com.tikkit.api.domain.member.dto.SignupRequest;
 import com.tikkit.api.support.AbstractContainerTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -34,7 +34,7 @@ class AuthIntegrationTest extends AbstractContainerTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper jsonMapper;
 
     @Test
     @DisplayName("가입 후 로그인하면 세션이 발급되고, 그 세션으로 내 정보 조회에 성공한다")
@@ -68,7 +68,7 @@ class AuthIntegrationTest extends AbstractContainerTest {
         MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
                         .session(sessionBeforeLogin)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginRequest("user2@tikkit.com", PASSWORD))))
+                        .content(jsonMapper.writeValueAsString(new LoginRequest("user2@tikkit.com", PASSWORD))))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -104,7 +104,7 @@ class AuthIntegrationTest extends AbstractContainerTest {
         // when & then
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginRequest("user4@tikkit.com", "wrong-password"))))
+                        .content(jsonMapper.writeValueAsString(new LoginRequest("user4@tikkit.com", "wrong-password"))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
     }
@@ -121,7 +121,7 @@ class AuthIntegrationTest extends AbstractContainerTest {
     private void signup(String email) throws Exception {
         mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(
+                        .content(jsonMapper.writeValueAsString(
                                 new SignupRequest(email, PASSWORD, "홍길동", "010-1111-2222"))))
                 .andExpect(status().isOk());
     }
@@ -129,7 +129,7 @@ class AuthIntegrationTest extends AbstractContainerTest {
     private MvcResult login(String email) throws Exception {
         return mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginRequest(email, PASSWORD))))
+                        .content(jsonMapper.writeValueAsString(new LoginRequest(email, PASSWORD))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.email").value(email))
                 .andReturn();

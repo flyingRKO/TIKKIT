@@ -1,6 +1,5 @@
 package com.tikkit.api.integration.reservation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tikkit.api.domain.member.dto.LoginRequest;
 import com.tikkit.api.domain.member.dto.SignupRequest;
 import com.tikkit.api.domain.member.entity.Member;
@@ -38,11 +37,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -74,7 +74,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     @Autowired
     private MockMvc mockMvc;
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper jsonMapper;
     @Autowired
     private VenueRepository venueRepository;
     @Autowired
@@ -154,7 +154,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andExpect(jsonPath("$.data.reservationNo").value(matchesPattern("^TK\\d{6}-\\d{6}$")))
@@ -182,19 +182,19 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         MvcResult first = mockMvc.perform(post("/api/v1/reservations")
                         .session(session1)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(firstRequest)))
+                        .content(jsonMapper.writeValueAsString(firstRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
         MvcResult second = mockMvc.perform(post("/api/v1/reservations")
                         .session(session2)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(secondRequest)))
+                        .content(jsonMapper.writeValueAsString(secondRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
 
         // then
-        String firstNo = objectMapper.readTree(first.getResponse().getContentAsString()).at("/data/reservationNo").asText();
-        String secondNo = objectMapper.readTree(second.getResponse().getContentAsString()).at("/data/reservationNo").asText();
+        String firstNo = jsonMapper.readTree(first.getResponse().getContentAsString()).at("/data/reservationNo").asString();
+        String secondNo = jsonMapper.readTree(second.getResponse().getContentAsString()).at("/data/reservationNo").asString();
         assertThat(firstNo).isNotEqualTo(secondNo);
     }
 
@@ -206,7 +206,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
 
         mockMvc.perform(post("/api/v1/reservations")
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
@@ -223,7 +223,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
@@ -238,13 +238,13 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DUPLICATE_PENDING_RESERVATION"));
     }
@@ -268,7 +268,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("SOLD_OUT"));
     }
@@ -352,7 +352,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
@@ -368,7 +368,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.data.confirmedAt").isNotEmpty());
@@ -396,7 +396,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", expired.getId())
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("RESERVATION_EXPIRED"));
     }
@@ -410,14 +410,14 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk());
 
         // when & then
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("INVALID_STATUS_TRANSITION"));
     }
@@ -448,7 +448,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk());
         clearPersistenceContext();
         int availableAfterPay = availableSeatCount(onSaleGrade.getId());
@@ -484,7 +484,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isOk());
         clearPersistenceContext();
 
@@ -509,7 +509,7 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         mockMvc.perform(post("/api/v1/reservations/{id}/payments", reservationId)
                         .session(strangerSession)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
+                        .content(jsonMapper.writeValueAsString(new PaymentRequest(PaymentMethod.CARD))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         mockMvc.perform(post("/api/v1/reservations/{id}/cancel", reservationId).session(strangerSession))
@@ -607,10 +607,10 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
         MvcResult result = mockMvc.perform(post("/api/v1/reservations")
                         .session(session)
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(jsonMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
                 .andReturn();
-        return objectMapper.readTree(result.getResponse().getContentAsString()).at("/data/id").asLong();
+        return jsonMapper.readTree(result.getResponse().getContentAsString()).at("/data/id").asLong();
     }
 
     /**
@@ -652,13 +652,13 @@ class ReservationApiIntegrationTest extends AbstractContainerTest {
     private MockHttpSession loginAsNewMember(String email) throws Exception {
         mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(
+                        .content(jsonMapper.writeValueAsString(
                                 new SignupRequest(email, PASSWORD, "홍길동", "010-1111-2222"))))
                 .andExpect(status().isOk());
 
         MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new LoginRequest(email, PASSWORD))))
+                        .content(jsonMapper.writeValueAsString(new LoginRequest(email, PASSWORD))))
                 .andExpect(status().isOk())
                 .andReturn();
         return (MockHttpSession) loginResult.getRequest().getSession(false);
