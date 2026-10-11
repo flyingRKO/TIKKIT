@@ -269,12 +269,22 @@ Phase 7~9는 전부 로컬 Docker로 재현·측정한다. 클라우드 VM이 �
   - ✅ `docs/improvements/004_1-spring-boot-4-migration.md` 작성. `005`~`010`에 이름이 예약된 Task들을 밀지 않으려고 서브번호 관행(`V3_1`, `V4_1`, `Task 026_1`)을 따랐다
   - 알려진 한계: **Jackson 2와 3이 한 JVM에 공존한다**(swagger-core가 Jackson 2를 쓰는 동안 그대로. 현재 증상은 없다). **HOT 측정 표본이 3건**이라 경향만 본 것이고 Task 027에서 다시 재야 한다. 좌석맵 DB 쿼리 3.15~3.55 ms는 **004 문서의 플랜 설명을 보고 재구성한 동등 쿼리** 측정이라 before 10.70 ms와 직접 비교할 수 없다 — 유효한 결론은 "플랜 모양이 같다"까지다. **한 번에 올렸으므로 "무엇이 무엇을 깨뜨렸나"를 diff로 가를 수 없다**(3.5.x 경유를 안 골랐다). Gradle은 8.14.4에 머물러 있고 9.x 전환은 별도 건이다
   - 번호를 `027`이 아니라 `026_1`로 붙인 이유: Task 027~033이 ERD 마이그레이션 이력과 기술 스택 표에서 참조되고 있어 번호를 밀면 여러 곳을 같이 고쳐야 한다 (마이그레이션에서 `V4` 대신 `V3_1`을 쓴 것과 같은 이유)
-- **Task 024: [공통] 컨테이너화 및 로컬 운영 스택**
-  - BE layered-jar Dockerfile, FE `output: 'standalone'` Dockerfile
-  - `docker-compose.prod.yml` (BE + FE + PostgreSQL + Redis), 로컬 `.env` 기준 환경변수 관리
-  - **완료 기준은 로컬 구동 검증이다** — prod 이미지로 전체 스택을 띄워 Playwright e2e 3개가 통과하는지 확인한다. dev 프로필 기동과 다른 점(Flyway 적용 시점, CORS origin, `output: 'standalone'`의 정적 파일 복사 누락)이 여기서 드러난다
-  - `.github/workflows/ci.yml`에 `docker build` 잡 추가 (**푸시 없이 빌드만**) — Dockerfile이 조용히 썩는 것을 막는다. 레지스트리 푸시와 VM 배포는 Task 034
-  - GitHub Secrets·레지스트리 인증·도메인은 범위 밖 (Task 034)
+- **Task 024: [공통] 컨테이너화 및 로컬 운영 스택** ✅ - 완료
+  - ✅ BE layered-jar Dockerfile(`temurin:21-jdk` 빌드 → `21-jre-alpine` 런타임), FE `output: 'standalone'` Dockerfile(`node:22-bookworm-slim` 3스테이지). 이미지 **BE 137 MB / FE 89 MB**(`docker save` 기준), 둘 다 비루트 실행
+  - ✅ **Boot 4는 `jarmode=layertools`가 아니라 `jarmode=tools extract`다**(3.3에서 교체). 더 중요한 건 `--launcher`를 주지 않으면 `Main-Class`가 `Start-Class`로 치환된 thin jar가 만들어져 **`JarLauncher`를 거치지 않고 `java -jar`로 바로 뜬다**는 것 — 인터넷에 흔한 `ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]`는 이 구성에서 틀린 명령이다. 공식 4.1.1 문서와 v4.1.1 태그의 `ExtractCommand.java`로 확인
+  - ✅ 레이어 분리 실측: `dependencies` **77.6 MB**(거의 안 변함) / `application` **184 kB**(매 빌드). 코드만 고치면 78MB가 아니라 184kB만 새 레이어가 된다. 빌드 콜드 70초 → 소스 변경 시 **21초**
+  - ✅ `docker-compose.prod.yml`(루트, 서비스 4개) + 통합 `.env.example`. **dev 스택과 동시에 띄울 수 있다** — 컨테이너명 `-prod` 접미사, DB/Redis 호스트 포트 미공개, 볼륨 `pgdata-prod` 분리(시드 버전이 migration 사이에 끼어 있어 볼륨 혼용은 Flyway 기동을 깬다)
+  - ✅ **완료 기준 달성** — prod 이미지로 띄운 스택에서 e2e **3개 통과**(5.5초), `compose up` → 4개 전부 healthy **24초**, BE 컨테이너 기동 **4.414초**(004_1의 로컬 4.42초와 동일 수준), 테스트 123개 통과
+  - ✅ **ROADMAP이 예고한 함정 3개가 전부 실재했고, 공통점은 "전부터 경고로만 있던 것"이었다.** (1) **Flyway 시드** — prod 프로필은 `db/seed`를 안 읽어서 `${FLYWAY_LOCATIONS}` 토글을 만들었다(기본값은 운영 기준). **양방향으로 측정**했다: 기본값은 마이그레이션 8개·데이터 0건, 켜면 11개·ON_SALE 3건. (2) **CORS origin** — `WebConfig`의 하드코딩을 `@Value("...") String[]`로 외부화(스프링이 콤마를 자동 split해서 다중 origin이 공짜로 따라온다). (3) **정적 파일 복사 누락** — `public/`이 아예 없어서 공식 Next 템플릿의 `COPY /app/public`은 빌드가 깨지고, 파비콘·Pretendard가 둘 다 `.next/static/media`에만 있어 그 한 줄을 빼면 **페이지는 200인데 CSS·폰트만 404**가 된다. **e2e 3개는 이 상태에서도 통과하므로**(DOM만 보니까) 자산 응답 코드를 따로 쟀다
+  - ✅ **springdoc을 끄니 그 자리가 404가 아니라 500을 뱉었다** — `GlobalExceptionHandler`의 `@ExceptionHandler(Exception.class)`가 `NoResourceFoundException`("404를 내라"는 프레임워크 신호)을 먹어버린 것. **그동안 안 보인 이유는 `anyRequest().authenticated()`가 모르는 경로를 먼저 401로 끊어서**, 이 구멍에 빠지는 건 "permitAll인데 핸들러가 없는 경로"뿐이고 springdoc을 끄기 전까지 그런 경로가 없었다. 보안 설정이 예외 처리의 결함을 덮고 있었다. 핸들러 5줄 추가로 404로 교정(계획 밖 변경, `ErrorCode.NOT_FOUND` 재사용). ROADMAP:268이 이 Task로 넘긴 항목 해소
+  - ✅ **루트의 빈 `package-lock.json`(의존성 0개, 초기 커밋 이후 불변)이 standalone 레이아웃을 바꾸고 있었다** — Next가 그걸 보고 모노레포 루트를 워크스페이스 루트로 추정해 산출물이 `.next/standalone/tikkit-front/` 아래로 중첩된다. Dockerfile을 그대로 썼으면 `CMD ["node", "server.js"]`가 파일을 못 찾는다. `outputFileTracingRoot: __dirname`으로 고정(파일을 지우는 대신 레이아웃이 밖의 파일에 종속되는 구조를 끊는 쪽)
+  - ✅ **devtools가 기동 실패를 가리고 있었다** — prod datasource에 기본값을 안 줬는데 `bootRun`은 컨텍스트가 깨져도 `BUILD SUCCESSFUL`(exit 0)로 끝난다(`developmentOnly`라 bootJar엔 없음). 컨테이너에서는 정직하게 **exit 1**. 로컬 결과만 믿었으면 "기본값을 안 주는 설계"가 무력하다고 잘못 판단했을 것이다
+  - ✅ **actuator가 없어서(Task 025 범위) 헬스체크를 도메인 엔드포인트로 대체했다** — CI e2e 잡이 쓰는 `GET /api/v1/performances?size=1`(permitAll, 200이면 Hikari+Flyway까지 끝난 것). `curl`이 jre-alpine에 없어 busybox `wget`을 쓰고, `CMD-SHELL`이면 `?size=1`이 셸 글로빙 대상이라 **exec 배열 형식**으로 줬다. **빈 DB에서도 healthy**인 것을 확인 — 목록 API가 빈 배열로 200을 주기 때문이고, 상세·통계 엔드포인트를 골랐으면 시드 없는 운영 DB에서 영원히 unhealthy였다
+  - ✅ `playwright.config.ts`에 조건부 `webServer` — `E2E_BASE_URL`이 있으면 `undefined`로 끈다. `reuseExistingServer`로는 안 되는데 CI에서 그 값이 false가 되어 포트 충돌하고 로컬에서도 Playwright가 남의 서버를 죽이려 든다. **기존 두 경로는 무변경**(로컬·CI 둘 다 그 변수를 안 쓴다) → `ci.yml`의 e2e 잡 수정 없음, 회귀 3개 통과
+  - ✅ `ci.yml`에 `docker-build` 잡 **추가만**(34줄, 삭제 0줄). 매트릭스로 BE/FE, `push: false`·`load: false`, `cache-from/to: type=gha,scope=${{ matrix.name }}`(scope를 안 나누면 두 이미지가 같은 키를 덮어써 매번 캐시 미스가 된다), `needs` 없이 기존 3개 잡과 병렬
+  - ✅ `.dockerignore` 2개 — 컨텍스트가 `tikkit-back` 82 MB → **642 KB**, `tikkit-front` 1.7 GB → **1.1 MB**. 효과는 이미지 크기가 아니라 빌드 시작 비용과 캐시 수명이다(`node_modules`를 안 빼면 `npm install` 한 번에 모든 레이어 캐시가 무효화된다)
+  - ✅ `docs/improvements/004_2-containerization.md` 작성. `005`~`010`이 뒤 Task에 이름까지 예약돼 있어 `004_1`과 같은 서브번호 관행을 따랐다
+  - 알려진 한계: **푸시·배포는 안 했다**(Task 034). **CI 캐시는 검증되지 않았다** — `type=gha` 적중과 scope 분리는 PR을 두 번 푸시해봐야 안다. **시드를 켠 이미지로 검증했다**(시드 없는 운영 경로는 기동·헬스체크까지만). **시드의 판매중 회차가 적용 시점 기준 상대 날짜**라 볼륨을 만든 지 27일이 지나면 ON_SALE이 0개가 되어 e2e가 깨진다 — 근본 수정 대신 "e2e 전에 `down -v`"를 못 박았다. **세션 쿠키 `secure`는 false**(평문 HTTP라 켜면 e2e가 전부 깨진다, Task 034). **BE는 1개뿐**이고 2개로 늘리면 `@EnableScheduling` 배치가 두 번 돈다(Task 026에서 ShedLock 류 필요). **헬스체크가 도메인 엔드포인트**라 그 경로·권한이 바뀌면 조용히 unhealthy가 되고 5초 주기 트래픽이 Task 025 지표에 섞인다. **이미지 크기 수치가 도구마다 다르다** — `docker save`/`inspect`는 137MB/89MB인데 `docker images`는 434MB/381MB이고 `--provenance=false --sbom=false`로도 안 바뀐다(원인 미해결, 문서 수치는 `docker save` 기준). **루트 `package-lock.json`은 남아 있다**(영향만 끊었다). `next start`가 `output: standalone`과 함께 "동작하지 않는다"는 경고를 내지만 실측하니 자산까지 정상 서브되고 로컬·CI e2e 둘 다 통과해서 그대로 뒀다
 - **Task 025: [BE] 모니터링 구축**
   - Actuator + micrometer-prometheus 연동, compose에 Prometheus·Grafana 추가
   - 대시보드: HTTP p95, HikariCP 풀, JVM, 예매 성공/실패 카운터
@@ -355,5 +365,5 @@ CANCELLED, EXPIRED 전이 시 재고(수량 또는 좌석)를 복원한다. Phas
 
 ---
 
-**📅 최종 업데이트**: 2026-10-10
-**📊 진행 상황**: Phase 7 진행 중 — Task 026_1(Spring Boot 4.1.1 업그레이드) 완료, 다음은 Task 024(컨테이너화·로컬 운영 스택). 비용이 드는 배포·CD는 Task 034로 떼어내 Phase 10으로 미뤘다 (24/35 Tasks 완료)
+**📅 최종 업데이트**: 2026-10-11
+**📊 진행 상황**: Phase 7 진행 중 — Task 024(컨테이너화·로컬 운영 스택) 완료, 다음은 Task 025(모니터링 구축). 비용이 드는 배포·CD는 Task 034로 떼어내 Phase 10으로 미뤘다 (25/35 Tasks 완료)

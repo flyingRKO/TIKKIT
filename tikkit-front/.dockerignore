@@ -1,0 +1,28 @@
+# 의존성과 빌드 산출물. 호스트(Windows)에서 만든 결과가 섞이면
+# 네이티브 바이너리(@tailwindcss/oxide, lightningcss)의 플랫폼이 어긋난다.
+node_modules
+.next
+out
+
+# 테스트. 이미지 빌드에 필요 없다.
+e2e/
+playwright.config.ts
+playwright-report/
+test-results/
+blob-report/
+
+# 환경 변수. API_BASE_URL은 런타임 환경변수로 주입한다.
+.env
+.env.*
+
+# 문서와 에이전트 설정
+*.md
+.claude/
+.mcp.json
+
+# IDE와 기타
+.vscode/
+.idea/
+*.tsbuildinfo
+Dockerfile
+.dockerignore

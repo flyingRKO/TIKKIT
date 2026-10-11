@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+// E2E_BASE_URL이 밖에서 주어지면 "이미 떠 있는 FE를 쓰라"는 뜻으로 해석한다
+// (Task 024: docker-compose.prod.yml로 띄운 FE 컨테이너를 대상으로 돌릴 때).
+const EXTERNAL_BASE_URL = process.env.E2E_BASE_URL;
+const BASE_URL = EXTERNAL_BASE_URL ?? "http://localhost:3000";
 
 export default defineConfig({
   testDir: "e2e",
@@ -27,11 +30,18 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  // FE만 띄운다. BE(dev 프로필)와 DB는 밖에서 미리 띄워 둬야 한다 (시드 데이터가 dev 프로필에서만 들어감)
-  webServer: {
-    command: "npm run start",
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // E2E_BASE_URL이 없을 때만 FE를 직접 띄운다. BE(dev 프로필)와 DB는 밖에서 미리 띄워 둬야 한다
+  // (시드 데이터가 dev 프로필에서만 들어감).
+  //
+  // E2E_BASE_URL이 있으면 webServer를 아예 끈다. reuseExistingServer로는 안 되는데,
+  // CI에서는 그 값이 false가 되어 `npm run start`가 3000번 포트를 두고 충돌하고,
+  // 로컬에서도 Playwright가 종료 시점에 남의 서버(컨테이너)를 죽이려 들기 때문이다.
+  webServer: EXTERNAL_BASE_URL
+    ? undefined
+    : {
+        command: "npm run start",
+        url: BASE_URL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
 });

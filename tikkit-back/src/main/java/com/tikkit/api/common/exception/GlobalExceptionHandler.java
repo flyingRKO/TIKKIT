@@ -8,6 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.List;
 
@@ -38,6 +39,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleConstraintViolation(ConstraintViolationException e) {
         return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.getStatus())
                 .body(ApiResponse.error(ErrorCode.VALIDATION_ERROR, List.of(e.getMessage())));
+    }
+
+    /**
+     * 매핑된 핸들러가 없는 경로. permitAll이면서 핸들러가 없는 경로가 여기로 온다
+     * (springdoc을 끈 prod 프로필의 /v3/api-docs, /swagger-ui.html 등 — Task 024).
+     *
+     * 아래 Exception 핸들러에 맡기면 500 + ERROR 스택트레이스가 되는데, "없는 리소스"에
+     * 서버 오류를 주면 상황 설명이 틀리고 스캐너 트래픽이 로그를 ERROR로 덮는다.
+     * 인증이 필요한 경로의 unknown 요청은 여기 오기 전에 시큐리티가 401로 끊는다.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(NoResourceFoundException e) {
+        return ResponseEntity.status(ErrorCode.NOT_FOUND.getStatus())
+                .body(ApiResponse.error(ErrorCode.NOT_FOUND));
     }
 
     @ExceptionHandler(Exception.class)

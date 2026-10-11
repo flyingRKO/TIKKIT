@@ -157,3 +157,23 @@ CORS 설정 필요: `tikkit-front` 도메인 허용
 |---------|------|-----|
 | `dev` | 로컬 개발 | PostgreSQL (Docker) |
 | `test` | 테스트 실행 | PostgreSQL (Testcontainers) |
+| `prod` | 컨테이너 기동 (Task 024) | PostgreSQL (`docker-compose.prod.yml`) |
+
+`prod` 프로필은 dev와 세 가지가 다르다.
+
+- **DB 접속 정보에 기본값이 없다** (`${DB_URL}`, `${DB_USERNAME}`, `${DB_PASSWORD}`).
+  환경변수를 빼먹으면 기동이 실패한다 — localhost의 엉뚱한 DB를 Flyway로 건드리는 쪽이 더 비싸다.
+- **시드가 환경변수 토글이다** (`${FLYWAY_LOCATIONS:classpath:db/migration}`).
+  기본값은 마이그레이션만 적용한다. 로컬에서 e2e를 돌릴 때만 `classpath:db/seed`를 덧붙인다.
+  `db/seed`의 버전(`V1_1`, `V4_1`, `V5_1`)이 `db/migration` 사이에 끼어 있어서
+  **시드를 켠 볼륨과 끈 볼륨은 섞어 쓸 수 없다** (`down -v`로 비우고 다시 만든다).
+- **swagger-ui와 `/v3/api-docs`가 꺼져 있다** (`springdoc.*.enabled: false`). 404로 응답한다.
+
+전체 스택 기동은 저장소 루트에서 한다. `tikkit-back/docker-compose.yml`(개발 인프라)과
+동시에 띄울 수 있다 — 컨테이너명·볼륨이 다르고 prod 쪽은 DB/Redis 포트를 호스트에 열지 않는다.
+
+```bash
+cd ..                       # 저장소 루트
+cp .env.example .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
