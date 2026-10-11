@@ -154,3 +154,37 @@ jobs:
         with:
           name: e2e-backend-log
           path: ${{ runner.temp }}/backend.log
+
+  # Dockerfile이 조용히 썩는 것을 막는다 — 빌드만 하고 레지스트리에 푸시하지 않는다.
+  # GHCR 푸시와 VM 배포는 Task 034 범위다.
+  docker-build:
+    runs-on: ubuntu-latest
+    # BE는 컨테이너 안에서 Gradle 의존성을 처음부터 받으므로 frontend 잡보다 오래 걸린다.
+    timeout-minutes: 20
+    strategy:
+      # 한쪽이 깨져도 나머지 Dockerfile 상태를 같은 실행에서 보고 싶다
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: tikkit-back
+          - name: frontend
+            context: tikkit-front
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          # 로컬 데몬에 적재하지 않는다 — 빌드 성공 여부만 보면 되고,
+          # load는 러너 디스크에 수백 MB를 쓴다.
+          load: false
+          tags: tikkit-${{ matrix.name }}:ci
+          # GHA 캐시. scope를 나누지 않으면 두 이미지가 같은 키를 두고 서로 덮어쓴다.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
