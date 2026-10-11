@@ -1,4 +1,8 @@
 spring:
+  # Micrometer의 공통 태그와 구조화 로그의 service.name으로 쓰인다 (Task 025).
+  application:
+    name: tikkit-api
+
   profiles:
     active: dev
 
@@ -28,3 +32,36 @@ tikkit:
   redis:
     enabled: ${REDIS_ENABLED:false}
     address: ${REDIS_ADDRESS:redis://localhost:6379}
+
+# 모니터링 (Task 025). Boot 4에서 management.endpoint.<id>.enabled가 제거되고
+# management.endpoint.<id>.access(none/read-only/unrestricted)로 바뀌었다.
+management:
+  endpoints:
+    access:
+      # 기본을 차단으로 두고 아래에서 명시적으로 허용한 것만 연다. access가 none이면
+      # 엔드포인트가 컨텍스트에서 아예 제거되므로, 나중에 누가 exposure.include를 "*"로
+      # 바꿔도 env·heapdump·threaddump가 열리지 않는다 (2중 방어).
+      default: none
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      access: read-only
+    prometheus:
+      access: read-only
+  metrics:
+    distribution:
+      # 이게 없으면 _bucket 시리즈가 안 나오고 Grafana에서 histogram_quantile을 쓸 수 없다.
+      #
+      # management.metrics.distribution.percentiles(인스턴스가 미리 계산한 _quantile)를
+      # 쓰지 않는 이유: 분위수는 수학적으로 합산이 불가능해서 여러 인스턴스 값을 하나로 못 묶는다.
+      # BE가 2대가 되는 Task 026에서 쓸 수 없게 되므로 처음부터 버킷 방식으로 간다.
+      percentiles-histogram:
+        http.server.requests: true
+      # 버킷 범위를 좁혀 시리즈 수를 줄인다 (기본은 1ns~30s 전 구간을 다 만든다).
+      # 이 범위 밖의 값은 p95 정확도가 떨어진다.
+      minimum-expected-value:
+        http.server.requests: 5ms
+      maximum-expected-value:
+        http.server.requests: 10s
