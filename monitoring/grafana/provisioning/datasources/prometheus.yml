@@ -1,0 +1,14 @@
+# Grafana 데이터소스 프로비저닝 (Task 025).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # uid를 고정하는 게 핵심이다. 대시보드 JSON이 datasource를 이 uid로 하드코딩하므로,
+    # 자동 생성 uid에 맡기면 참조가 끊겨 모든 패널이 "No data"가 된다.
+    uid: prometheus
+    # 서비스명이 compose 네트워크의 DNS 이름이다 (호스트의 9090을 거치지 않는다).
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

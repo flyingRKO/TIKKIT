@@ -1,0 +1,20 @@
+# Prometheus 스크레이프 설정 (Task 025).
+# docker-compose.prod.yml의 prometheus 서비스가 /etc/prometheus/prometheus.yml로 읽기전용 마운트한다.
+global:
+  # 기본값 15s보다 짧게 둔다 — 타깃이 1개뿐이고, 로컬에서 몇 분짜리 부하를 걸어 보는 용도라
+  # 해상도가 중요하다. 대신 10초보다 짧은 스파이크는 이 설정으로는 보이지 않는다.
+  #
+  # rate()/increase()의 창은 scrape_interval의 4배 이상이어야 값이 안정적이므로
+  # 대시보드 쿼리는 [1m]을 쓴다.
+  scrape_interval: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: tikkit-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # compose 네트워크의 DNS 이름이다. 호스트 포트(8080)를 거치지 않는다.
+      #
+      # Task 026에서 BE를 2대로 늘리면 여기에 backend2:8080을 한 줄 더 적는다.
+      # instance 라벨에 타깃 주소가 그대로 들어가므로("backend:8080") 두 인스턴스가 자동으로 갈린다.
+      - targets: ["backend:8080"]

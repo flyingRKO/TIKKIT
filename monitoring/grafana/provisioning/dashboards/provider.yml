@@ -1,0 +1,14 @@
+# 대시보드 프로비저닝 (Task 025).
+# 대시보드의 진실은 JSON 파일이다 — UI에서 고친 내용은 Grafana 재시작 시 덮인다.
+apiVersion: 1
+
+providers:
+  - name: tikkit
+    type: file
+    # UI에서 대시보드를 지우지 못하게 한다 (파일이 진실이므로 지워도 다시 생긴다).
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      # docker-compose.prod.yml이 monitoring/grafana/dashboards를 읽기전용으로 마운트하는 경로
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

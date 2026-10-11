@@ -61,7 +61,10 @@ management:
         http.server.requests: true
       # 버킷 범위를 좁혀 시리즈 수를 줄인다 (기본은 1ns~30s 전 구간을 다 만든다).
       # 이 범위 밖의 값은 p95 정확도가 떨어진다.
+      # 하한을 1ms로 둔다. 처음 5ms로 잡았더니 로컬 응답이 대부분 그보다 빨라서
+      # 전부 첫 버킷에 들어갔고, histogram_quantile이 [0, 5ms]를 보간해 어떤 엔드포인트든
+      # p95가 4.7ms 근처로 나왔다 — 값이 아니라 버킷 경계를 읽고 있던 것이다 (Task 025에서 실측).
       minimum-expected-value:
-        http.server.requests: 5ms
+        http.server.requests: 1ms
       maximum-expected-value:
         http.server.requests: 10s

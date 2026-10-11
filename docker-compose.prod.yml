@@ -122,6 +122,67 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # --- 모니터링 (Task 025) ---
+  # profiles로 묶어서 --profile monitoring을 줄 때만 뜬다. 평소 e2e 검증에는 필요 없고,
+  # 별도 compose 파일로 쪼개는 방식(-f 2개)은 down에서 -f를 빼먹으면 orphan이 남는다.
+  # compose down은 프로필과 무관하게 프로젝트 전체를 지우므로 이쪽이 안전하다.
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: tikkit-prometheus-prod
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # 로컬 디스크를 지키기 위해 보존 기간을 줄인다 (기본 15d)
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata-prod:/prometheus
+    ports:
+      - "9090:9090"
+    # depends_on을 걸지 않는다. Prometheus는 스크레이프를 계속 재시도하므로 backend보다
+    # 먼저 떠도 되고, 오히려 backend 재기동에 묶이지 않는 쪽이 맞다.
+    healthcheck:
+      # 이 이미지에 /bin/wget이 있다 (distroless 변종이 아니다).
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.3
+    container_name: tikkit-grafana-prod
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # 문서용 스크린샷을 로그인 없이 찍기 위한 익명 조회. 로컬 전용 스택이라 허용한다 —
+      # 공개 환경에 올릴 땐(Task 034) 반드시 끈다.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      # provider.yml의 path와 일치해야 한다. 대시보드의 진실은 이 JSON 파일이고,
+      # UI에서 고친 내용은 재시작 시 덮인다 (allowUiUpdates: false).
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata-prod:/var/lib/grafana
+    ports:
+      # Grafana 기본 포트는 3000인데 tikkit-front가 그걸 쓴다 -> 호스트는 3001로 뺀다.
+      - "3001:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
 volumes:
   # 이름에 -prod를 붙여 dev의 pgdata와 섞이지 않게 한다
   pgdata-prod:
+  # 측정 직후 스택을 내려도 수치를 다시 읽을 수 있어야 해서 영속화한다 (보존 7일).
+  promdata-prod:
+  # 대시보드는 provisioning이 진실이지만, Grafana의 내부 DB(사용자·설정)는 여기 남는다.
+  grafanadata-prod:
