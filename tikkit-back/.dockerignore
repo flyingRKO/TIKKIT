@@ -1,0 +1,26 @@
+# 빌드 산출물. 호스트(Windows)에서 만든 결과가 컨텍스트에 섞이면 레이어 캐시가 매번 깨진다.
+build/
+.gradle/
+
+# 테스트 소스. 이미지 빌드는 `bootJar -x test`라 필요 없다 (테스트는 CI의 backend 잡이 돈다).
+src/test/
+
+# 로컬 환경 설정과 개발용 인프라
+.env
+.env.*
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# 문서와 에이전트 설정
+*.md
+.claude/
+.mcp.json
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.vscode/
