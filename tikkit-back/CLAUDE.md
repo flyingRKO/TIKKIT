@@ -14,6 +14,7 @@
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
 | Redis | 7 | 캐시·대기열 (Task 020 도입, `REDIS_ENABLED=true`일 때만 연결) |
 | Redisson | 4.8.0 | Redis 클라이언트 |
+| Actuator + Micrometer | - | 헬스·지표 노출 (`/actuator/health`, `/actuator/prometheus`, Task 025) |
 | Lombok | - | 보일러플레이트 코드 감소 |
 | JUnit 5 | - | 테스트 프레임워크 |
 
@@ -137,6 +138,34 @@ docker-compose up -d
 DB 자격증명은 `application-dev.yml`에서 `${DB_USERNAME:tikkit_user}` 형태의 기본값을 쓴다. 평소엔 아무 설정 없이 `.env`의 값과 동일하게 동작하고, 필요할 때만(CI 등) `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` 환경변수로 재정의한다.
 
 Redis는 `tikkit.redis.enabled`가 기본 `false`라 애플리케이션이 연결하지 않는다. Redis 없이도 기동과 테스트가 돌아야 하기 때문이다 — 이유는 `docs/improvements/003-redis-distributed-lock.md` 3절. 쓰려면 `REDIS_ENABLED=true`로 실행한다. 캐시(Task 029)·대기열(Task 031)에서 본격적으로 쓴다.
+
+## 모니터링 (Task 025)
+
+actuator가 여는 엔드포인트는 **`/actuator/health`와 `/actuator/prometheus` 둘뿐**이다.
+`management.endpoints.access.default: none`이라 나머지는 컨텍스트에 아예 없고,
+`SecurityConfig`가 이 둘만 `permitAll`로 연다. 엔드포인트를 더 노출하려면 두 곳을 같이 고쳐야 한다.
+
+```bash
+curl -s localhost:8080/actuator/health              # dev는 show-details: always
+curl -s localhost:8080/actuator/prometheus | head   # 지표 원본
+```
+
+주의할 점 셋.
+
+- **`http.server.requests`에 actuator 경로도 잡힌다.** 대시보드 PromQL은
+  `uri!~"/actuator.*"`로 걸러야 한다 (compose 헬스체크가 30초마다 때린다).
+- **버킷 범위(`minimum/maximum-expected-value`)를 잘못 잡으면 p95가 값이 아니라 버킷 경계를
+  읽는다.** 처음 5ms로 뒀다가 모든 엔드포인트가 4.8ms로 같게 나온 적이 있다
+  ([004_3](../docs/improvements/004_3-monitoring.md) 4.1절). 지금은 1ms~10s다.
+- **새 Counter를 추가하면 기동 시 0으로 미리 등록한다.** 한 번도 증가하지 않은 Counter는
+  시리즈 자체가 없어서 Grafana가 "No data"를 띄우고, 그러면 "0건"과 "계측 없음"을 구분할 수 없다.
+  `ReservationService.registerAttemptCounters()` 참고.
+
+예매 지표는 `tikkit.reservation.attempts` 하나이고 태그가 `result`(success/failure) +
+`reason`(`ErrorCode` 이름)이다. 태그 **키 집합**은 성공·실패가 같아야 한다 —
+Micrometer가 같은 이름에 키 집합이 다른 미터를 거부한다.
+
+대시보드를 띄우는 방법은 저장소 루트 README의 "운영 스택 + 모니터링" 참고.
 
 ## 에이전트 안내
 

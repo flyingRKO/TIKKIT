@@ -65,6 +65,16 @@ dependencies {
     // 4.x로 올린 이유: 3.50.0은 netty 4.1을 요구하는데 Boot 4가 관리하는 netty는 4.2다.
     implementation 'org.redisson:redisson:4.8.0'
 
+    // 모니터링 (Task 025). starter-actuator가 spring-boot-starter-micrometer-metrics까지
+    // 끌고 오므로 메트릭 스타터를 따로 선언하지 않는다.
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // /actuator/prometheus를 켜는 레지스트리. 버전은 micrometer-bom이 관리한다(1.17.1).
+    // micrometer-registry-prometheus-simpleclient는 구 Prometheus 클라이언트(0.16) 라인이라 쓰지 않는다 —
+    // 자동설정이 신 패키지(io.micrometer.prometheusmetrics.PrometheusMeterRegistry)를 보므로
+    // 그쪽을 고르면 /actuator/prometheus가 아예 뜨지 않는다.
+    // 코드에서 MeterRegistry 인터페이스만 쓰므로 runtimeOnly로 둔다.
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+
     // Boot 4에서 테스트 지원이 기술별 스타터로 쪼개졌다. spring-boot-starter-test는
     // 이 스타터들이 전이 의존으로 끌고 오므로 따로 선언하지 않는다.
     // AssertJ·Mockito도 버전을 고정하지 않고 BOM에 맡긴다 (고정하면 JUnit 버전과 어긋날 수 있다).

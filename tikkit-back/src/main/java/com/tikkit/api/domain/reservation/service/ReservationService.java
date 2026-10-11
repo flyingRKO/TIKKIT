@@ -22,6 +22,9 @@ import com.tikkit.api.domain.reservation.dto.ReservationSummaryResponse;
 import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -46,6 +49,27 @@ public class ReservationService {
     /** V3_2의 부분 유니크 인덱스 이름. 중복 선점 위반만 골라내는 데 쓴다. */
     private static final String UK_PENDING_HOLD = "uk_reservations_pending_member_grade";
 
+    /**
+     * 예매 선점 시도 카운터 (Task 025). Prometheus에서는
+     * {@code tikkit_reservation_attempts_total{result="failure",reason="SOLD_OUT"}}로 보인다.
+     * <p>
+     * 카운터를 success/failure 두 개로 쪼개지 않은 이유: 한 쿼리에서 {@code by (result)}로 묶거나
+     * 실패율을 계산할 수 없게 된다.
+     */
+    private static final String ATTEMPTS_METRIC = "tikkit.reservation.attempts";
+    private static final String RESULT_SUCCESS = "success";
+    private static final String RESULT_FAILURE = "failure";
+    private static final String REASON_NONE = "none";
+    private static final String REASON_UNEXPECTED = "UNEXPECTED";
+
+    /** {@code create}가 실제로 던지는 ErrorCode 목록. 기동 시 0으로 미리 등록하는 데 쓴다. */
+    private static final List<ErrorCode> CREATE_FAILURE_CODES = List.of(
+            ErrorCode.NOT_FOUND,
+            ErrorCode.BOOKING_NOT_OPEN,
+            ErrorCode.VALIDATION_ERROR,
+            ErrorCode.DUPLICATE_PENDING_RESERVATION,
+            ErrorCode.SOLD_OUT);
+
     private final ReservationRepository reservationRepository;
     private final TicketGradeRepository ticketGradeRepository;
     private final ScheduleSeatRepository scheduleSeatRepository;
@@ -53,6 +77,62 @@ public class ReservationService {
     private final ReservationNoGenerator reservationNoGenerator;
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;
+    private final MeterRegistry meterRegistry;
+
+    /**
+     * 예매 카운터를 0으로 미리 등록한다.
+     * <p>
+     * 한 번도 증가하지 않은 Counter는 {@code /actuator/prometheus}에 시리즈 자체가 나오지 않는다.
+     * 그러면 갓 띄운 스택의 Grafana 패널이 "No data"가 되어 <b>실패가 0인 것과 계측이 없는 것을
+     * 구분할 수 없다.</b>
+     */
+    @PostConstruct
+    void registerAttemptCounters() {
+        attemptCounter(RESULT_SUCCESS, REASON_NONE);
+        for (ErrorCode code : CREATE_FAILURE_CODES) {
+            attemptCounter(RESULT_FAILURE, code.name());
+        }
+        attemptCounter(RESULT_FAILURE, REASON_UNEXPECTED);
+    }
+
+    /**
+     * 성공에도 {@code reason="none"}을 붙인다 — Micrometer는 같은 이름에 태그 <b>키 집합</b>이
+     * 다른 미터를 거부하므로, 성공만 reason을 빼면 두 번째 등록에서 예외가 난다.
+     * <p>
+     * reason을 ErrorCode 이름으로 두는 이유: enum이라 값이 유계다. 사용자 입력을 태그로 쓰면
+     * 시리즈가 무한히 늘어나 Prometheus가 죽는다.
+     */
+    private Counter attemptCounter(String result, String reason) {
+        return meterRegistry.counter(ATTEMPTS_METRIC, "result", result, "reason", reason);
+    }
+
+    /**
+     * 예매 선점을 생성하고 성공·실패를 계측한다 (Task 025).
+     * <p>
+     * 계측을 서비스 안에서 하는 이유: {@code @Counted} AOP는 예외 클래스명만 태그로 붙이는데
+     * 이 흐름의 실패는 전부 {@code BusinessException} 한 종류라 SOLD_OUT과
+     * DUPLICATE_PENDING_RESERVATION을 구분할 수 없다. 그 구분이 오픈런 분석의 핵심이다.
+     * <p>
+     * <b>한계</b>: 성공 카운트가 트랜잭션 안에서 증가하므로, 커밋 시점에 롤백되면(드묾) 성공이
+     * 과대 집계된다. 또 컨트롤러 단에서 400/401로 끊긴 요청은 여기 닿지 않아 잡히지 않는다 —
+     * 그건 {@code http_server_requests}의 status별 지표가 보여준다.
+     */
+    @Transactional
+    public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
+        try {
+            ReservationResponse response = createPending(memberId, request);
+            attemptCounter(RESULT_SUCCESS, REASON_NONE).increment();
+            return response;
+        } catch (BusinessException e) {
+            attemptCounter(RESULT_FAILURE, e.getErrorCode().name()).increment();
+            throw e;
+        } catch (RuntimeException e) {
+            // 조건부 UPDATE 불변식 위반(IllegalStateException)이나 되던진 DataIntegrityViolation.
+            // 안 세면 failure 합계가 실제 실패보다 작아져 실패율이 거짓이 된다.
+            attemptCounter(RESULT_FAILURE, REASON_UNEXPECTED).increment();
+            throw e;
+        }
+    }
 
     /**
      * 예매 선점(PENDING 홀드)을 생성한다.
@@ -69,8 +149,7 @@ public class ReservationService {
      * {@code reservation_id}를 요구하고 그 컬럼이 {@code reservations} FK라, 예약 행이 없으면 좌석을
      * 잡을 수가 없다. 전환 전에는 재고 차감이 먼저였는데 순서가 뒤집힌 지점이다.
      */
-    @Transactional
-    public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
+    private ReservationResponse createPending(Long memberId, ReservationCreateRequest request) {
         TicketGrade ticketGrade = ticketGradeRepository.findById(request.ticketGradeId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
 

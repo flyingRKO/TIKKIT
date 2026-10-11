@@ -111,11 +111,14 @@ jobs:
           nohup java -jar "$JAR" > "$RUNNER_TEMP/backend.log" 2>&1 &
 
       - name: Wait for backend
-        # 비로그인 GET이 열려 있는 공연 목록 API로 기동 여부를 확인한다
+        # actuator 도입(Task 025)으로 도메인 엔드포인트 대신 헬스 엔드포인트를 쓴다.
+        # /actuator/health는 DataSourceHealthIndicator를 포함하므로 UP이면 Hikari 커넥션과
+        # Flyway 마이그레이션까지 끝났다는 뜻이다 — 기존 보증과 같다.
+        # --fail + --retry-all-errors라 기동 중 503(DOWN)도 재시도 대상이 된다.
         run: |
           curl --silent --show-error --fail \
             --retry 60 --retry-delay 2 --retry-connrefused --retry-all-errors \
-            "http://localhost:8080/api/v1/performances?size=1" > /dev/null
+            "http://localhost:8080/actuator/health" > /dev/null
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4

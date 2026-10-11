@@ -47,6 +47,12 @@ public class SecurityConfig {
                                 "/api/v1/schedules/*/ticket-grades",
                                 "/api/v1/schedules/*/seats").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        // 모니터링 엔드포인트 (Task 025). /actuator/** 와일드카드를 쓰지 않는다 —
+                        // 나중에 엔드포인트를 하나 더 노출하면 의도 없이 같이 열린다.
+                        // 노출 자체는 application.yml의 management.endpoints.web.exposure.include가
+                        // health·prometheus 둘로 제한하고, 그 밖의 엔드포인트는 access: none이라
+                        // 컨텍스트에 아예 없다.
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(apiAuthenticationEntryPoint)

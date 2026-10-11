@@ -29,12 +29,15 @@ import com.tikkit.api.domain.reservation.entity.Reservation;
 import com.tikkit.api.domain.reservation.entity.ReservationStatus;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
 import com.tikkit.api.domain.venue.entity.Venue;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -84,6 +87,15 @@ class ReservationServiceTest {
 
     @Mock
     private PaymentGateway paymentGateway;
+
+    /**
+     * 예매 카운터(Task 025)를 검증하려면 실제 레지스트리가 필요하다.
+     * {@code @Mock}으로 두면 {@code registry.counter(...)}가 null을 반환해 바로 NPE가 되고,
+     * 아예 빼면 생성자 주입에 null이 들어가 같은 결과가 된다. {@code @Spy} 필드도
+     * {@code @InjectMocks}의 주입 후보라 그대로 들어간다.
+     */
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks
     private ReservationService reservationService;
@@ -268,6 +280,7 @@ class ReservationServiceTest {
         verify(scheduleSeatRepository).holdSeats(
                 eq(List.of(1L, 2L)), any(), eq(TICKET_GRADE_ID), eq(grade.getPrice()), any());
         verify(reservationRepository).save(any());
+        assertThat(attempts("success", "none")).isEqualTo(1.0);
     }
 
     @Test
@@ -373,6 +386,40 @@ class ReservationServiceTest {
         // 전환 전에는 재고 차감이 먼저여서 save가 아예 호출되지 않았다. 지금은 ck_schedule_seats_status_holder
         // 때문에 예약 행이 먼저 있어야 좌석을 잡을 수 있어서, save는 이미 실행됐고 롤백이 되돌린다.
         verify(reservationRepository).save(any());
+        // 좌석 경쟁 실패가 reason 태그로 갈려야 한다 — 중복 선점 가드와 구분되는 게 오픈런 분석의 핵심이다.
+        assertThat(attempts("failure", "SOLD_OUT")).isEqualTo(1.0);
+        assertThat(attempts("success", "none")).isZero();
+    }
+
+    @Test
+    @DisplayName("성공과 실패 카운터가 같은 태그 키 집합을 쓴다 — 어긋나면 Micrometer가 두 번째 등록을 거부한다")
+    void 카운터_태그_키_집합이_일치한다() {
+        // given: 같은 테스트 안에서 성공 1건과 실패 1건을 차례로 만든다.
+        Instant now = Instant.now();
+        TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
+        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
+        given(reservationNoGenerator.generate(any())).willReturn("TK260927-000010");
+
+        // when: 먼저 성공
+        reservationService.create(MEMBER_ID, request(2));
+        // 그다음 실패 — 좌석을 1석만 잡히게 바꾼다
+        given(scheduleSeatRepository.holdSeats(anyList(), any(), any(), any(), any())).willReturn(1);
+        assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request(2)))
+                .isInstanceOf(BusinessException.class);
+
+        // then: 성공에 reason="none"을 붙이지 않았다면 여기까지 오기 전에 예외가 났다.
+        assertThat(attempts("success", "none")).isEqualTo(1.0);
+        assertThat(attempts("failure", "SOLD_OUT")).isEqualTo(1.0);
+    }
+
+    /** tikkit.reservation.attempts 카운터의 현재 값. 아직 등록되지 않았으면 0으로 본다. */
+    private double attempts(String result, String reason) {
+        return meterRegistry.find("tikkit.reservation.attempts")
+                .tags("result", result, "reason", reason)
+                .counters().stream()
+                .mapToDouble(counter -> counter.count())
+                .sum();
     }
 
     @Test

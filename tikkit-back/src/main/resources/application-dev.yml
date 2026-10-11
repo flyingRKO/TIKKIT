@@ -14,3 +14,10 @@ spring:
   # dev 프로필에서만 db/seed(개발용 시드 데이터)를 함께 로드한다.
   flyway:
     locations: classpath:db/migration,classpath:db/seed
+
+# 로컬에서는 /actuator/health가 어떤 컴포넌트 때문에 DOWN인지 바로 보여야 한다
+# (db·diskSpace·ping 등 개별 지표). prod는 기본값(never)을 유지한다.
+management:
+  endpoint:
+    health:
+      show-details: always
