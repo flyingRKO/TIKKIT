@@ -45,6 +45,7 @@ API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시�
 | 데이터베이스 | PostgreSQL 15 (Docker), Flyway |
 | 캐시·대기열 | Redis 7 + Redisson (Task 020 도입, `REDIS_ENABLED=true`일 때만 사용) |
 | 테스트·CI | JUnit 5 + Testcontainers (BE), Playwright (E2E), GitHub Actions |
+| 모니터링 | Actuator + Micrometer + Prometheus + Grafana (Task 025, `--profile monitoring`) |
 
 ## 아키텍처
 
@@ -127,6 +128,34 @@ npm run screenshots               # README용 스크린샷 재생성 (docs/image
 - 시드 공연의 날짜는 "시드를 적용한 시점" 기준 상대 날짜입니다. 같은 DB를 오래 쓰면 공연이 하나씩 판매 종료되고, 적용한 지 약 50일이 지나면 예매중 공연이 하나도 남지 않아 테스트가 실패합니다. 이때는 `docker-compose down -v`로 볼륨까지 지우고 다시 띄우세요.
 - 테스트는 매번 새 회원(`e2e-{timestamp}@tikkit.com`)으로 가입하고 마지막에 예약을 취소해서 재고를 되돌립니다. 가입한 회원은 DB에 남습니다.
 - CI에서는 `e2e` 잡이 Postgres 서비스 컨테이너를 매번 새로 만들어서 같은 순서로 실행합니다. `screenshots`는 CI에서 돌리지 않습니다.
+
+### 운영 스택 + 모니터링
+
+운영 이미지로 전체 스택을 띄우고, 거기에 Prometheus·Grafana를 얹어 지표를 봅니다.
+`--profile monitoring`을 줄 때만 모니터링 컨테이너 2개가 뜹니다.
+
+```bash
+cp .env.example .env                                                  # 최초 1회
+docker compose -f docker-compose.prod.yml down -v                     # 시드가 상대 날짜라 매번 비우고 시작
+docker compose -f docker-compose.prod.yml --profile monitoring up -d --build
+```
+
+| 주소 | 용도 |
+|---|---|
+| http://localhost:3000 | 프론트엔드 |
+| http://localhost:8080/actuator/health | 백엔드 헬스 (compose 헬스체크가 쓰는 것) |
+| http://localhost:8080/actuator/prometheus | 지표 원본 |
+| http://localhost:9090/targets | Prometheus 스크레이프 상태 |
+| http://localhost:3001 | **Grafana 대시보드** (익명 조회, 로그인 불필요) |
+
+Grafana가 3001인 이유는 기본 포트 3000을 프론트엔드가 쓰기 때문입니다. 대시보드는
+`monitoring/grafana/dashboards/tikkit-backend.json`이 진실이고 UI에서 고친 내용은 재시작 시
+덮입니다 — 패널을 바꾸려면 JSON을 고쳐 커밋하세요.
+
+보이는 것: HTTP p95·처리량, HikariCP 풀(`pending`이 0을 벗어나면 풀 포화), JVM 힙·GC·스레드·CPU,
+예매 선점 성공/실패와 **실패 사유 분해**(`SOLD_OUT` / `DUPLICATE_PENDING_RESERVATION` 등).
+
+측정 방법과 한계는 [004_3. 모니터링 구축](docs/improvements/004_3-monitoring.md)에 정리했습니다.
 
 ## 포트폴리오 포인트 (예정)
 
