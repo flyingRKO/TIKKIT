@@ -62,7 +62,11 @@ class ActuatorEndpointAccessTest extends AbstractContainerTest {
                 .contains("process_cpu_usage")
                 .contains("hikaricp_connections_active")
                 .contains("hikaricp_connections_pending")
-                .contains("hikaricp_connections_max");
+                .contains("hikaricp_connections_max")
+                // 커스텀 비즈니스 카운터(Task 025). 한 번도 증가하지 않아도 ReservationService가
+                // 기동 시 0으로 미리 등록하므로 시리즈가 있어야 한다 — 없으면 Grafana 패널이
+                // "No data"가 되어 "실패 0"과 "계측 없음"을 구분할 수 없다.
+                .contains("tikkit_reservation_attempts_total");
     }
 
     @Test
