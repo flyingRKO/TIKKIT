@@ -10,12 +10,5 @@ CLAUDE.local.md
 .env.local
 .env.*.local
 
-# IntelliJ IDEA (프로젝트 공유용 설정 파일 일부만 추적하고 나머지는 무시)
-.idea/*
-!.idea/.gitignore
-!.idea/*.iml
-!.idea/compiler.xml
-!.idea/gradle.xml
-!.idea/misc.xml
-!.idea/modules.xml
-!.idea/modules/
+# IntelliJ IDEA (전부 무시 — 로컬 환경에 따라 내용이 달라져 커밋에 섞인다)
+.idea/
