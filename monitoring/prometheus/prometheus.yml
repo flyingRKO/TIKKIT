@@ -13,8 +13,11 @@ scrape_configs:
   - job_name: tikkit-backend
     metrics_path: /actuator/prometheus
     static_configs:
-      # compose 네트워크의 DNS 이름이다. 호스트 포트(8080)를 거치지 않는다.
+      # compose 네트워크의 DNS 이름이다. instance 라벨에 타깃 주소가 그대로 들어가므로
+      # ("backend1:8080") 두 인스턴스가 자동으로 갈린다.
       #
-      # Task 026에서 BE를 2대로 늘리면 여기에 backend2:8080을 한 줄 더 적는다.
-      # instance 라벨에 타깃 주소가 그대로 들어가므로("backend:8080") 두 인스턴스가 자동으로 갈린다.
-      - targets: ["backend:8080"]
+      # nginx(80)를 거치지 않고 BE를 직접 긁는다. 두 가지 이유다 —
+      #  1) nginx는 /actuator를 404로 막는다 (Task 026). 프록시를 거치면 수집이 불가능하다
+      #  2) 로드밸런서를 거치면 스크레이프가 두 인스턴스 중 한쪽으로만 가서
+      #     instance 라벨이 매번 바뀌고 시계열이 뒤섞인다
+      - targets: ["backend1:8080", "backend2:8080"]

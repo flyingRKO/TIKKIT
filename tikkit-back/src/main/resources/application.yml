@@ -14,6 +14,14 @@ spring:
     locations: classpath:db/migration
 
 server:
+  # nginx 뒤에 서면(Task 026) 애플리케이션이 보는 원격 주소는 전부 nginx 컨테이너 IP이고
+  # 스킴은 http다. framework 전략은 스프링의 ForwardedHeaderFilter를 등록해
+  # X-Forwarded-For/Proto/Host를 request에 반영한다.
+  #
+  # 주의: 이 설정은 "앞단 프록시를 신뢰한다"는 선언이다. 지금은 nginx만이 BE에 닿을 수 있는
+  # compose 네트워크라 안전하지만, BE 포트가 밖으로 열리면 클라이언트가 헤더를 위조해
+  # 자기 IP를 바꿔 말할 수 있다. 그래서 compose에서 backend1/2의 호스트 포트를 닫았다.
+  forward-headers-strategy: framework
   servlet:
     session:
       timeout: 30m
