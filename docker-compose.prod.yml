@@ -7,6 +7,53 @@
 
 name: tikkit-prod
 
+# --- backend1/backend2 공유 설정 (Task 026) ---
+# 두 인스턴스의 환경변수와 헬스체크가 **완전히 같아야** 한다. 한쪽만 다르면 이 Task가
+# 측정하려는 "세션이 어디 있는가"가 아니라 설정 차이를 측정하게 된다. 앵커로 묶어서
+# 한쪽만 고치는 실수를 구조적으로 막는다.
+x-backend-env: &backend-env
+  SPRING_PROFILES_ACTIVE: prod
+  # 서비스명(postgres)이 compose 네트워크의 DNS 이름이다
+  DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+  DB_USERNAME: ${POSTGRES_USER}
+  DB_PASSWORD: ${POSTGRES_PASSWORD}
+  # 로컬 e2e 검증에서는 시드를 켠다 (.env 참조). 운영이라면 비워 기본값을 쓴다.
+  FLYWAY_LOCATIONS: ${FLYWAY_LOCATIONS:-classpath:db/migration}
+  # 브라우저가 BE를 직접 호출하지 않으므로 실제로 발동하지 않는 설정이다.
+  # nginx가 들어온 뒤로는 단일 origin이 되어 더더욱 쓰이지 않는다 (WebConfig 주석 참조).
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+  REDIS_ENABLED: ${REDIS_ENABLED:-false}
+  REDIS_ADDRESS: redis://redis:6379
+  # 인증 상태를 어디에 두는가 (Task 026). memory | redis
+  #
+  # **기본값이 redis다.** BE가 2대라 memory면 세션 불일치가 난다 — 같은 쿠키로 요청을
+  # 반복하면 200과 401이 섞인다. 재현을 보려면 일부러 memory로 띄운다.
+  # (REDIS_ENABLED와는 별개 토글이다 — 그쪽은 Redisson용이고 주입처가 아직 0건이다)
+  #
+  # 주의: 이 값을 바꿔 컨테이너를 재생성하면 backend IP가 바뀌어 nginx가 옛 IP를 물고
+  # 502를 뱉는다. 반드시 `restart nginx`를 같이 한다 (nginx/nginx.conf 상단 주석).
+  AUTH_SESSION_STORE: ${AUTH_SESSION_STORE:-redis}
+
+x-backend-healthcheck: &backend-healthcheck
+  # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는
+  # DataSourceHealthIndicator를 포함하므로 UP이면 Hikari 커넥션과 Flyway 마이그레이션까지
+  # 끝났다는 뜻이다.
+  #
+  # 이 요청은 컨테이너 안에서 자기 자신(localhost:8080)을 때리므로 nginx의 /actuator 차단과
+  # 무관하다. 차단은 "밖에서 들어오는 경로"에만 걸린다.
+  #
+  # curl은 jre-alpine 이미지에 없다. busybox wget을 쓰고 exec 형식(CMD)을 유지한다.
+  test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/actuator/health"]
+  # 헬스 요청도 http_server_requests에 uri="/actuator/health"로 잡히므로(Task 025)
+  # 평상시 주기를 늘려 지표 오염을 원천에서 줄인다. 인스턴스가 2대가 되면 이 트래픽도 2배다.
+  interval: 30s
+  timeout: 3s
+  retries: 3
+  # start_period 동안은 start_interval(2s)로 자주 찔러서 compose up의 healthy 도달 시간을
+  # 유지한다 (Docker 25+/compose 2.20+).
+  start_period: 60s
+  start_interval: 2s
+
 services:
   postgres:
     image: postgres:15
@@ -43,53 +90,78 @@ services:
       retries: 5
     restart: unless-stopped
 
-  backend:
+  # --- 백엔드 2대 (Task 026) ---
+  #
+  # container_name을 주지 않는다. 고정명은 애초에 복제가 불가능하고(그래서 Task 024가
+  # "BE는 1개뿐"이라는 한계를 남겼다), 이제는 compose가 tikkit-prod-backend1-1 식으로 붙인다.
+  # 로그를 볼 때는 컨테이너명이 아니라 서비스명으로 지목한다:
+  #   docker compose -f docker-compose.prod.yml logs backend1 backend2
+  #
+  # --scale 대신 서비스를 2개 명시 선언한 이유: Prometheus의 static_configs는 타깃을
+  # DNS 이름으로 적는데(backend1:8080), --scale로 늘린 복제본은 같은 서비스명 하나에
+  # IP 여러 개로 붙어서 instance 라벨이 갈리지 않는다. 그러면 "어느 인스턴스가
+  # 세션을 들고 있나"를 대시보드에서 구분할 수 없고, 그게 이 Task의 측정 전부다.
+  #
+  # 둘 다 build를 둔다. 같은 context·같은 image 태그라 두 번째 빌드는 전부 캐시 적중이다
+  # (한쪽만 build를 두면 `up` 시점에 이미지가 없을 때 pull을 시도해서 실패한다).
+  backend1:
     build:
       context: ./tikkit-back
     image: tikkit-backend:local
-    container_name: tikkit-backend-prod
-    environment:
-      SPRING_PROFILES_ACTIVE: prod
-      # 서비스명(postgres)이 compose 네트워크의 DNS 이름이다
-      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      DB_USERNAME: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      # 로컬 e2e 검증에서는 시드를 켠다 (.env 참조). 운영이라면 비워 기본값을 쓴다.
-      FLYWAY_LOCATIONS: ${FLYWAY_LOCATIONS:-classpath:db/migration}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
-      # RedissonClient를 주입받는 코드가 0건이라 기본은 꺼둔다. 켜면 Redisson이 기동 시점에
-      # 바로 접속하므로 아래 depends_on의 redis 헬스 대기가 그때 의미를 갖는다 (Task 029/031).
-      REDIS_ENABLED: ${REDIS_ENABLED:-false}
-      REDIS_ADDRESS: redis://redis:6379
-      # JVM 옵션이 필요하면 여기에. JVM이 자동으로 읽으므로 ENTRYPOINT를 sh로 감쌀 필요가 없다.
-      # JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0"
-    ports:
-      - "8080:8080"
+    environment: *backend-env
+    # 호스트 포트를 열지 않는다. 외부 진입점은 nginx(80) 하나다 —
+    # "/actuator/prometheus가 호스트에 열려 있다"는 004_3 9절의 지적이 이걸로 닫힌다.
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는
-    # DataSourceHealthIndicator를 포함하므로 UP이면 Hikari 커넥션과 Flyway 마이그레이션까지
-    # 끝났다는 뜻이다 — 기존 보증(/api/v1/performances 200)과 같거나 더 세다.
-    #
-    # /actuator/health/readiness를 쓰지 않은 이유: 기본 readiness 그룹은 readinessState 하나뿐이라
-    # DB를 확인하지 않아 기존보다 보증이 약해진다. probes가 필요해지는 건 오케스트레이터가
-    # 들어오는 Task 034다.
-    #
-    # curl은 jre-alpine 이미지에 없다. busybox wget을 쓰고 exec 형식(CMD)을 유지한다.
+    healthcheck: *backend-healthcheck
+    restart: unless-stopped
+
+  backend2:
+    build:
+      context: ./tikkit-back
+    image: tikkit-backend:local
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck: *backend-healthcheck
+    restart: unless-stopped
+
+  # --- 리버스 프록시 / 로드밸런서 (Task 026) ---
+  # 설정과 설계 근거는 nginx/nginx.conf에 있다.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: tikkit-nginx-prod
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # 유일한 외부 진입점. 브라우저는 여기만 본다.
+      - "80:80"
+    depends_on:
+      backend1:
+        condition: service_healthy
+      backend2:
+        condition: service_healthy
+      # service_healthy가 아니라 service_started다. frontend의 헬스체크가 "/" 페이지를
+      # 받아보는데, 그 페이지는 Server Component가 API_BASE_URL(=nginx)로 BE를 호출한다.
+      # 즉 frontend가 healthy해지려면 nginx가 먼저 떠 있어야 한다 — healthy를 기다리면
+      # 서로를 기다리는 교착이 된다. 컨테이너가 떠 있으면 DNS 이름은 해석되고,
+      # nginx는 업스트림 이름만 해석되면 기동한다.
+      frontend:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/actuator/health"]
-      # 5s -> 30s. 헬스 요청도 http_server_requests에 uri="/actuator/health"로 잡히는 걸
-      # 확인했으므로(Task 025), 평상시 주기를 늘려 지표 오염을 원천에서 줄인다.
-      # 대시보드 쪽에서도 uri!~"/actuator.*"로 한 번 더 걸러낸다.
+      # 업스트림을 타지 않는 전용 경로다. "/"로 확인하면 프록시는 멀쩡한데
+      # frontend가 아직 안 떴다는 이유로 unhealthy가 된다.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/healthz"]
       interval: 30s
       timeout: 3s
       retries: 3
-      # start_period 동안은 start_interval(2s)로 자주 찔러서 compose up의 healthy 도달 시간을
-      # 유지한다. interval만 30s로 늘리면 기동 감지가 그만큼 느려진다 (Docker 25+/compose 2.20+).
-      start_period: 60s
+      start_period: 10s
       start_interval: 2s
     restart: unless-stopped
 
@@ -102,12 +174,15 @@ services:
       # 브라우저가 아니라 Next 서버가 쓰는 값이다(NEXT_PUBLIC_ 아님) → 컨테이너 주소를 준다.
       # lib/api/client.ts의 fallback("http://localhost:8080")은 컨테이너 안에서 자기 자신을
       # 가리키므로, 이 값이 빠지면 모든 API 호출이 NETWORK_ERROR가 된다.
-      API_BASE_URL: http://backend:8080
+      #
+      # Task 026에서 backend:8080 -> nginx로 바꿨다. Next 서버의 API 호출이 로드밸런서를
+      # 거치게 되고, 이 한 줄이 세션 불일치를 만드는 지점이다 — 같은 쿠키를 들고 나간
+      # 요청들이 backend1과 backend2로 흩어진다.
+      API_BASE_URL: http://nginx
       NODE_ENV: production
-    ports:
-      - "3000:3000"
+    # 호스트 포트를 열지 않는다. 브라우저는 nginx(80)로 들어온다.
     depends_on:
-      backend:
+      backend1:
         condition: service_healthy
     # node:slim에는 curl도 wget도 없다. Node 22의 전역 fetch로 확인한다.
     healthcheck:
@@ -119,7 +194,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 15s
+      # 15s -> 30s. "/" 페이지가 Server Component로 BE를 호출하는데 그 경로가 nginx를
+      # 지나고, nginx는 이 컨테이너가 started가 된 뒤에 뜬다. 즉 처음 몇 번의 헬스체크는
+      # nginx를 기다리다 실패하는 게 정상이다 (nginx의 depends_on 주석 참조).
+      start_period: 30s
     restart: unless-stopped
 
   # --- 모니터링 (Task 025) ---

@@ -105,7 +105,12 @@ Controller → Service → Repository → Entity
 
 - 민감한 데이터는 응답에 포함하지 않음
 - 모든 비밀번호는 BCrypt 암호화
-- 세션 기반 인증(`HttpSession`). 서버를 여러 대로 늘릴 때 생기는 세션 불일치와 JWT 전환 검토는 ROADMAP Task 026 참조
+- 인증 상태 저장 전략은 `tikkit.auth.session-store`로 고른다 — `memory`(기본) | `redis` | `jwt`.
+  전략을 고르는 자리는 `security/AuthStrategyConfig` **한 곳**이고, 로그인/로그아웃에서 무엇을 남기는지는
+  `security/login/LoginCredentialWriter` 구현이 정한다. 컨트롤러·서비스는 전략을 모른다.
+  BE를 2대 이상으로 띄우면 `memory`는 세션 불일치가 난다 — 비교·측정은 `docs/improvements/005-session-scaling.md` 참조
+- 새 `@Scheduled` 배치를 추가하면 **반드시 `@SchedulerLock`을 붙인다.** BE가 2대라 안 붙이면 양쪽에서 돈다.
+  기존 만료 배치는 조건부 UPDATE라 두 번 돌아도 데이터가 안 깨지지만, 알림 발송 같은 비멱등 작업은 그대로 사고다
 - SQL Injection 방지 (JPA 파라미터 바인딩)
 
 ## Gradle 스크립트

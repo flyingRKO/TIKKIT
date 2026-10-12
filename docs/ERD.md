@@ -339,5 +339,6 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V5 | 기존 데이터 좌석 배정 백필 (db/migration, 전 환경) | 021 |
 | V5_1 | 개발용 배치도 시드 — 좌표 보정·구역명·상태 샘플 (db/seed, dev 전용) | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |
+| V6_1 | `shedlock` 테이블 생성 (다중 인스턴스 배치 중복 실행 방지) | 026 |
 | V7 | 조회 성능 개선을 위한 인덱스 추가 | 027 |
 | V8 | 대기열 활성화 플래그 (`schedules.queue_enabled`) | 031 |

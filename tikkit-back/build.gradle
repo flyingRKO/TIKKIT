@@ -65,6 +65,31 @@ dependencies {
     // 4.x로 올린 이유: 3.50.0은 netty 4.1을 요구하는데 Boot 4가 관리하는 netty는 4.2다.
     implementation 'org.redisson:redisson:4.8.0'
 
+    // Spring Session Data Redis (Task 026). 세션을 JVM 메모리가 아니라 Redis에 둬서
+    // BE가 2대여도 같은 세션을 보게 한다.
+    //
+    // 주의: 이 스타터는 spring-boot-starter-data-redis(Lettuce)를 끌고 온다. Redisson을
+    // raw 라이브러리로 쓴 이유(003: 자동설정이 기동 시점에 즉시 연결한다)와 같은 문제가
+    // 재발할 수 있어서, application.yml에서 DataRedisAutoConfiguration을 **항상 제외**하고
+    // tikkit.auth.session-store=redis일 때만 SessionRedisConfig가 연결 팩토리를 직접 만든다.
+    // 그러면 Spring Session 자동설정의 @ConditionalOnBean(RedisConnectionFactory)이
+    // 따라오므로 프로퍼티 한 개로 세션 저장소 전체가 켜지고 꺼진다.
+    implementation 'org.springframework.boot:spring-boot-starter-session-data-redis'
+
+    // ShedLock (Task 026). BE가 2대가 되면 @Scheduled 배치가 양쪽에서 돈다.
+    //
+    // 7.x를 쓴다 — README 호환 매트릭스에서 Spring Boot 4.x를 테스트한 라인이 7.x뿐이다
+    // (6.x는 3.5/3.4까지). Boot BOM이 관리하지 않는 의존성이라 버전을 직접 고정한다.
+    //
+    // provider를 Redis가 아니라 JDBC로 고른 이유 둘:
+    // 1) 세션 전략으로 JWT를 채택하면 Redis가 스택에서 사라지는데, Redis provider면 그때
+    //    배치가 같이 깨진다. DB는 어느 전략에서도 항상 있다
+    // 2) JDBC provider만 usingDbTime()을 제공한다 — 락 판정에 **DB 서버 시계**를 써서
+    //    노드 간 시계 차이를 아예 제거한다. ShedLock의 알려진 함정 중 하나가
+    //    "노드 시계 차이가 lockAtLeastFor보다 크면 중복 실행된다"인데 그걸 원천 차단한다
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
+
     // 모니터링 (Task 025). starter-actuator가 spring-boot-starter-micrometer-metrics까지
     // 끌고 오므로 메트릭 스타터를 따로 선언하지 않는다.
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
