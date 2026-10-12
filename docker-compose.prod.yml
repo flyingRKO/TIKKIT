@@ -25,16 +25,14 @@ x-backend-env: &backend-env
   REDIS_ENABLED: ${REDIS_ENABLED:-false}
   REDIS_ADDRESS: redis://redis:6379
   # 인증 상태를 어디에 두는가 (Task 026). memory | redis
-  # memory면 BE 2대에서 세션 불일치가 재현된다. redis면 Spring Session이 HttpSession을
-  # Redis로 갈아끼운다(REDIS_ENABLED와는 별개 토글이다 — 그쪽은 Redisson용이다).
+  #
+  # **기본값이 redis다.** BE가 2대라 memory면 세션 불일치가 난다 — 같은 쿠키로 요청을
+  # 반복하면 200과 401이 섞인다. 재현을 보려면 일부러 memory로 띄운다.
+  # (REDIS_ENABLED와는 별개 토글이다 — 그쪽은 Redisson용이고 주입처가 아직 0건이다)
   #
   # 주의: 이 값을 바꿔 컨테이너를 재생성하면 backend IP가 바뀌어 nginx가 옛 IP를 물고
   # 502를 뱉는다. 반드시 `restart nginx`를 같이 한다 (nginx/nginx.conf 상단 주석).
-  AUTH_SESSION_STORE: ${AUTH_SESSION_STORE:-memory}
-  # jwt 모드에서만 쓰인다. 두 인스턴스가 **같은 키**를 받아야 한다 — 다르면 backend1이 서명한
-  # 토큰을 backend2가 거부해서 세션 불일치와 똑같은 증상(간헐적 401)이 나고, 원인은 더 찾기 어렵다.
-  # x-backend-env 앵커로 묶어둔 이유가 바로 이런 값이다.
-  JWT_SECRET: ${JWT_SECRET:-tikkit-local-jwt-secret-for-hs256-at-least-32-bytes}
+  AUTH_SESSION_STORE: ${AUTH_SESSION_STORE:-redis}
 
 x-backend-healthcheck: &backend-healthcheck
   # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는
