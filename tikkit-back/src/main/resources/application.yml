@@ -26,10 +26,32 @@ server:
     session:
       timeout: 30m
       cookie:
+        # 이름을 명시한다 (Task 026). 지금까지는 Tomcat 기본값이 우연히 JSESSIONID였지만,
+        # Spring Session이 끼면 DefaultCookieSerializer의 기본값인 SESSION으로 바뀐다.
+        # 그러면 tikkit-front/lib/api/auth.ts의 /JSESSIONID=([^;]+)/ 파싱이 null이 되어
+        # **로그인이 조용히 실패한다**(200은 그대로 내려오고 쿠키만 저장되지 않는다).
+        #
+        # Boot의 SessionAutoConfiguration이 server.servlet.session.cookie.*를 Spring Session의
+        # DefaultCookieSerializer로 매핑해준다. 그래서 CookieSerializer 빈을 직접 만들면 안 된다 —
+        # 그 자동 매핑이 @ConditionalOnMissingBean이라 http-only·same-site까지 같이 날아간다.
+        #
+        # max-age는 일부러 주지 않는다. 주면 세션 쿠키가 영속 쿠키로 바뀌어 전략 비교의 변수가 늘어난다.
+        name: JSESSIONID
         http-only: true
         same-site: lax
 
 tikkit:
+  # 인증 상태를 어디에 두는가 (Task 026). memory | redis
+  #
+  # 기본은 memory다 — Redis 없이도 기동·테스트가 돌아야 한다는 기존 결정을 지킨다
+  # (docs/improvements/003-redis-distributed-lock.md 3절). redis로 바꾸면 Spring Session이
+  # HttpSession을 Redis로 갈아끼운다. 전략별 빈 선택은 AuthStrategyConfig 한 곳에서 한다.
+  #
+  # BE를 2대로 늘리면 memory에서 세션 불일치가 난다. 이 프로퍼티는 그 해결책들을 같은 스택에서
+  # 번갈아 측정하기 위한 것이고, 비교가 끝나면 채택한 하나만 남기고 지운다.
+  auth:
+    session-store: ${AUTH_SESSION_STORE:memory}
+
   # 허용 origin. 콤마로 여러 개를 줄 수 있다 (WebConfig가 String[]로 받는다).
   # 기본값이 dev 프론트엔드라 로컬 개발·테스트는 설정 없이 그대로 돌아간다.
   cors:

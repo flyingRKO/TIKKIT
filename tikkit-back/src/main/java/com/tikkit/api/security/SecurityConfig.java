@@ -12,12 +12,13 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import org.springframework.security.web.context.SecurityContextRepository;
 
 /**
  * 세션 기반 인증 설정. UserDetailsService(MemberDetailsService)와 PasswordEncoder 빈만 있으면
  * AuthenticationConfiguration이 DaoAuthenticationProvider를 자동으로 구성해준다 (Spring Security 6 표준 방식).
+ *
+ * <p>인증 상태를 어디에 저장하는지(SecurityContextRepository)는 {@link AuthStrategyConfig}가 정한다 (Task 026).
+ * 이 클래스는 "누가 어디에 접근할 수 있는가"만 다룬다.
  */
 @Configuration
 @EnableWebSecurity
@@ -68,10 +69,5 @@ public class SecurityConfig {
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
         return configuration.getAuthenticationManager();
-    }
-
-    @Bean
-    public SecurityContextRepository securityContextRepository() {
-        return new HttpSessionSecurityContextRepository();
     }
 }
