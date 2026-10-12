@@ -157,7 +157,15 @@ services:
     healthcheck:
       # 업스트림을 타지 않는 전용 경로다. "/"로 확인하면 프록시는 멀쩡한데
       # frontend가 아직 안 떴다는 이유로 unhealthy가 된다.
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/healthz"]
+      #
+      # localhost가 아니라 127.0.0.1이다 (Task 027에서 발견). 컨테이너 /etc/hosts에
+      # "::1 localhost"가 있어서 busybox wget이 IPv6를 먼저 시도하는데, nginx의
+      # `listen 80;`은 IPv4만 바인딩하므로 Connection refused가 난다.
+      # 호스트에서 curl http://localhost/healthz는 200이라 겉으로는 멀쩡해 보인다.
+      #
+      # 이 버그는 Task 026부터 있었지만 nginx가 healthy해지기를 기다리는 서비스가
+      # 없어서 드러나지 않았다. k6가 depends_on: service_healthy로 걸면서 처음 막혔다.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -212,6 +220,14 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       # 로컬 디스크를 지키기 위해 보존 기간을 줄인다 (기본 15d)
       - --storage.tsdb.retention.time=7d
+      # k6가 부하 생성기 지표를 remote write로 밀어넣는다 (Task 027).
+      # 이 플래그가 없으면 /api/v1/write가 404로 떨어지고, k6는 "메트릭을 보냈다"고
+      # 말한 뒤 조용히 아무것도 남기지 않는다. 받는 쪽을 명시적으로 열어야 한다.
+      #
+      # 이걸 켜는 이유는 하나다 — k6의 p95와 BE의 Hikari/힙/GC를 **같은 타임라인에서**
+      # 보려는 것. 부하 생성기 지표를 따로 보면 "p95가 튄 순간에 커넥션 풀이 어땠나"를
+      # 눈으로 맞춰야 하고, 그게 004_3에서 가장 번거로웠던 부분이다.
+      - --web.enable-remote-write-receiver
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - promdata-prod:/prometheus
@@ -257,6 +273,39 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+
+  # --- 부하 테스트 (Task 027) ---
+  # up으로 띄우지 않고 `run --rm`으로 한 번씩 호출한다. 시나리오를 바꿔 여러 번 돌려야 하는
+  # one-shot 작업이고, profiles에 넣어두면 평소 up/e2e에서는 아예 뜨지 않는다.
+  #
+  #   docker compose -f docker-compose.prod.yml --profile load run --rm k6 \
+  #     run -o experimental-prometheus-rw --summary-export=/results/browse.json /scripts/browse.js
+  #
+  # 호스트 바이너리로 돌리지 않는 이유: compose 네트워크에 합류하면 nginx와 prometheus를
+  # 서비스명으로 바로 쓸 수 있다. 호스트에서는 BE(8080)와 nginx 내부 경로에 접근할 수 없고
+  # (포트를 퍼블리시하지 않는다), k6 설치 상태가 환경마다 달라져 재현성이 떨어진다.
+  k6:
+    image: grafana/k6:2.3.0
+    container_name: tikkit-k6
+    profiles: ["load"]
+    environment:
+      # 실제 사용자와 같은 경로로 들어간다 — nginx -> backend1/backend2 라운드로빈.
+      # BE를 직격(backend1:8080)하면 로드밸런서와 keepalive 효과가 측정에서 빠진다.
+      BASE_URL: http://nginx
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      # 기본값은 p(99)만 보낸다. 이 프로젝트의 before 수치가 전부 p95 기준이라 같이 보낸다.
+      K6_PROMETHEUS_RW_TREND_STATS: "p(95),p(99),min,max,avg"
+      # 실행마다 라벨을 달아 Grafana에서 회차를 구분한다 (keepalive on/off 비교에 쓴다).
+      K6_PROMETHEUS_RW_LABELS: "run=${K6_RUN_LABEL:-local}"
+    volumes:
+      - ./load-test/k6:/scripts:ro
+      - ./load-test/results:/results
+    depends_on:
+      nginx:
+        condition: service_healthy
+    # prometheus에는 depends_on을 걸지 않는다 (기존 관례). --profile monitoring을 같이 주면
+    # 떠 있고, 안 줬으면 remote write만 실패하고 터미널 요약은 정상적으로 나온다.
+    restart: "no"
 volumes:
   # 이름에 -prod를 붙여 dev의 pgdata와 섞이지 않게 한다
   pgdata-prod:

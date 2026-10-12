@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**지정석 전환 완료 + Spring Boot 4 업그레이드 — Phase 0~6 완료 & Phase 7 진행 중, 24/35 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
+**지정석 전환 + 운영 기반 완료, 성능 측정 시작 — Phase 0~7 완료 & Phase 8 진행 중, 28/35 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
@@ -46,6 +46,7 @@ API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시�
 | 캐시·대기열 | Redis 7 + Redisson (Task 020 도입, `REDIS_ENABLED=true`일 때만 사용) |
 | 테스트·CI | JUnit 5 + Testcontainers (BE), Playwright (E2E), GitHub Actions |
 | 모니터링 | Actuator + Micrometer + Prometheus + Grafana (Task 025, `--profile monitoring`) |
+| 부하 테스트 | k6 2.3.0 (Task 027, `--profile load`, Prometheus remote write로 같은 대시보드에 수집) |
 
 ## 아키텍처
 
@@ -178,6 +179,37 @@ Grafana가 3001인 이유는 기본 포트 3000을 프론트엔드가 쓰기 때
 예매 선점 성공/실패와 **실패 사유 분해**(`SOLD_OUT` / `DUPLICATE_PENDING_RESERVATION` 등).
 
 측정 방법과 한계는 [004_3. 모니터링 구축](docs/improvements/004_3-monitoring.md)에 정리했습니다.
+
+#### 부하 테스트 (Task 027)
+
+k6를 compose 서비스로 띄웁니다(`--profile load`). 실제 사용자와 같은 경로(nginx → BE 2대)로
+들어가고, 결과는 Prometheus remote write로 **같은 Grafana에 올라갑니다** — 부하 생성기의 p95와
+서버의 HikariCP·힙·GC를 한 타임라인에서 봅니다.
+
+```bash
+# 대량 데이터 주입 (schedule_seats 약 600만 행, 70초)
+for f in load-test/sql/0*.sql; do
+  docker compose -f docker-compose.prod.yml exec -T postgres \
+    psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f - < "$f"
+done
+
+# 시나리오 실행 (browse | seatmap | booking-spike). --no-deps 가 필수입니다
+docker compose -f docker-compose.prod.yml --profile load run --rm --no-deps k6 \
+  run -o experimental-prometheus-rw /scripts/seatmap.js
+
+# 측정 사이에 좌석 복구 (안 하면 다음 측정이 다른 걸 잽니다)
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - < load-test/sql/98-reset-reservations.sql
+```
+
+`--no-deps`를 빼면 compose가 백엔드를 재생성해서 JVM 워밍업이 날아가고 nginx가 옛 IP를 뭅니다.
+
+기준선(600만 행, 3회 중앙값): 탐색 p95 **2.36ms** / 좌석맵 **6.72ms** / 예매 **7.43ms**(82.2 req/s).
+**`http_req_failed`만 보면 안 됩니다** — 좌석 경쟁에서 밀린 요청이 409라서 서버가 초과 판매를
+막아낸 측정이 "실패율 12%"로 나옵니다. 그래서 "정상적 거절"과 "진짜 에러"를 가르는 커스텀
+지표(`tikkit_real_errors`)를 따로 둡니다.
+
+측정 결과와 한계는 [006. 성능 베이스라인](docs/improvements/006-performance-baseline.md)에 있습니다.
 
 ## 포트폴리오 포인트 (예정)
 

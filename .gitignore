@@ -12,3 +12,9 @@ CLAUDE.local.md
 
 # IntelliJ IDEA (전부 무시 — 로컬 환경에 따라 내용이 달라져 커밋에 섞인다)
 .idea/
+
+# k6 부하 테스트 결과 (실행마다 달라지고 용량이 크다 — 스크립트와 SQL은 추적한다)
+load-test/results/*
+# 디렉토리 자체는 추적한다. compose가 bind mount 대상을 자동 생성할 때 소유자가
+# root가 되어 k6 컨테이너(uid 12345)가 결과를 못 쓰는 경우가 있다.
+!load-test/results/.gitkeep
