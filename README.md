@@ -134,6 +134,9 @@ npm run screenshots               # README용 스크린샷 재생성 (docs/image
 운영 이미지로 전체 스택을 띄우고, 거기에 Prometheus·Grafana를 얹어 지표를 봅니다.
 `--profile monitoring`을 줄 때만 모니터링 컨테이너 2개가 뜹니다.
 
+**백엔드가 2대이고 앞에 nginx가 섭니다**(Task 026). 브라우저가 보는 주소는 `http://localhost`
+하나이고, 백엔드·프론트엔드 포트는 호스트에 열지 않습니다.
+
 ```bash
 cp .env.example .env                                                  # 최초 1회
 docker compose -f docker-compose.prod.yml down -v                     # 시드가 상대 날짜라 매번 비우고 시작
@@ -142,11 +145,30 @@ docker compose -f docker-compose.prod.yml --profile monitoring up -d --build
 
 | 주소 | 용도 |
 |---|---|
-| http://localhost:3000 | 프론트엔드 |
-| http://localhost:8080/actuator/health | 백엔드 헬스 (compose 헬스체크가 쓰는 것) |
-| http://localhost:8080/actuator/prometheus | 지표 원본 |
-| http://localhost:9090/targets | Prometheus 스크레이프 상태 |
+| http://localhost | **프론트엔드 + API** (nginx가 `/api/`는 백엔드로, 나머지는 Next로 보냅니다) |
+| http://localhost/actuator/health | **404입니다** — nginx가 `/actuator`를 프록시하지 않습니다 |
+| http://localhost:9090/targets | Prometheus 스크레이프 상태 (`backend1:8080`, `backend2:8080`) |
 | http://localhost:3001 | **Grafana 대시보드** (익명 조회, 로그인 불필요) |
+
+`/actuator`를 보려면 컨테이너 안에서 확인합니다. Prometheus도 nginx를 거치지 않고
+compose 네트워크로 직접 긁습니다.
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend1 wget -qO- http://localhost:8080/actuator/health
+```
+
+#### 세션 저장소 전략 (Task 026)
+
+`.env`의 `AUTH_SESSION_STORE`로 바꿉니다 — `memory` | `redis` | `jwt`.
+`memory`는 BE가 2대라 **세션 불일치가 재현되는 상태**입니다(같은 쿠키로 `/members/me`를
+반복하면 200과 401이 섞입니다). 값을 바꾼 뒤에는 nginx도 같이 재시작해야 합니다.
+
+```bash
+docker compose -f docker-compose.prod.yml up -d backend1 backend2
+docker compose -f docker-compose.prod.yml restart nginx   # upstream을 기동 시 1회만 해석하므로 필수
+```
+
+전략별 비교와 측정값은 [005. 세션 확장](docs/improvements/005-session-scaling.md)에 있습니다.
 
 Grafana가 3001인 이유는 기본 포트 3000을 프론트엔드가 쓰기 때문입니다. 대시보드는
 `monitoring/grafana/dashboards/tikkit-backend.json`이 진실이고 UI에서 고친 내용은 재시작 시
