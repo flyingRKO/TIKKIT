@@ -24,6 +24,13 @@ x-backend-env: &backend-env
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
   REDIS_ENABLED: ${REDIS_ENABLED:-false}
   REDIS_ADDRESS: redis://redis:6379
+  # 인증 상태를 어디에 두는가 (Task 026). memory | redis
+  # memory면 BE 2대에서 세션 불일치가 재현된다. redis면 Spring Session이 HttpSession을
+  # Redis로 갈아끼운다(REDIS_ENABLED와는 별개 토글이다 — 그쪽은 Redisson용이다).
+  #
+  # 주의: 이 값을 바꿔 컨테이너를 재생성하면 backend IP가 바뀌어 nginx가 옛 IP를 물고
+  # 502를 뱉는다. 반드시 `restart nginx`를 같이 한다 (nginx/nginx.conf 상단 주석).
+  AUTH_SESSION_STORE: ${AUTH_SESSION_STORE:-memory}
 
 x-backend-healthcheck: &backend-healthcheck
   # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는

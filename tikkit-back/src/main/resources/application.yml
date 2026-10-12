@@ -13,6 +13,42 @@ spring:
   flyway:
     locations: classpath:db/migration
 
+  # Spring Session Data Redis (Task 026)
+  autoconfigure:
+    exclude:
+      # 이 자동설정은 프로퍼티가 없어도 localhost:6379를 기본값으로 RedisConnectionFactory를
+      # 만든다. 그러면 Spring Session 자동설정의 @ConditionalOnBean(RedisConnectionFactory)이
+      # 항상 충족되어 **세션 저장소를 끌 방법이 없어진다**.
+      # Boot 4에는 spring.session.store-type 같은 저장소 선택 프로퍼티도, 비활성화 스위치도 없다
+      # (스타터를 넣는 것 자체가 선택이라는 설계다).
+      # 그래서 항상 제외하고, tikkit.auth.session-store=redis일 때만 SessionRedisConfig가
+      # 팩토리를 직접 만든다 — Redisson이 스타터를 피한 것과 같은 패턴이다.
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+      # 위를 제외하면 이것도 같이 제외해야 한다. Spring Data Redis 리포지토리 지원이
+      # redisReferenceResolver 빈을 만들면서 **`redisTemplate`을 이름으로** 찾는데,
+      # 그 빈을 만들던 게 방금 제외한 DataRedisAutoConfiguration이다.
+      # 증상은 "No bean named 'redisTemplate' available"로, 세션과 아무 관계없어 보인다.
+      # 우리는 Redis 리포지토리(@RedisHash 등)를 쓰지 않으므로 잃는 것이 없다.
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisRepositoriesAutoConfiguration
+
+  session:
+    data:
+      redis:
+        # Boot 4에서 접두사가 spring.session.redis.* -> spring.session.data.redis.*로 바뀌었다.
+        # 구 표기를 쓰면 **조용히 무시된다**(바인딩 실패가 아니라 그냥 안 먹는다).
+        namespace: tikkit:session
+        # 기본값은 default(RedisSessionRepository)인데 indexed를 고른다.
+        #
+        # 이유는 비교표의 "강제 로그아웃(권한 회수) 가능 여부" 칸이다. 특정 회원의 세션을
+        # 전부 찾아 지우려면 FindByIndexNameSessionRepository.findByPrincipalName()이 필요하고,
+        # 그 API는 indexed 전용이다. default는 세션 조회 색인이 없다.
+        #
+        # 대가: indexed는 기동 시점에 CONFIG SET으로 keyspace notification을 켜므로
+        # **Redis가 없으면 컨텍스트 기동이 깨진다**. Redisson 스타터를 피한 이유(003 3절)와
+        # 같은 모양의 비용을 여기서는 의도적으로 받는 것이다. compose가 이미
+        # depends_on: redis service_healthy를 걸고 있어 기동 순서는 보장된다.
+        repository-type: indexed
+
 server:
   # nginx 뒤에 서면(Task 026) 애플리케이션이 보는 원격 주소는 전부 nginx 컨테이너 IP이고
   # 스킴은 http다. framework 전략은 스프링의 ForwardedHeaderFilter를 등록해
