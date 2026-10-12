@@ -87,6 +87,15 @@ tikkit:
   # 번갈아 측정하기 위한 것이고, 비교가 끝나면 채택한 하나만 남기고 지운다.
   auth:
     session-store: ${AUTH_SESSION_STORE:memory}
+    jwt:
+      # session-store=jwt일 때만 쓰인다. HS256은 키가 32바이트(256비트) 이상이어야 하고
+      # 짧으면 기동이 깨진다 — 짧은 키로 도는 것보다 안전하다.
+      # 기본값은 로컬 비교 측정용이다. 운영이라면 .env의 JWT_SECRET으로 반드시 덮는다.
+      secret: ${JWT_SECRET:tikkit-local-jwt-secret-for-hs256-at-least-32-bytes}
+      # 세션 타임아웃(위 server.servlet.session.timeout)과 같은 30분을 준다.
+      # 비교 조건을 맞추려는 것이지만 **의미는 다르다** — 세션은 요청마다 만료가 밀리는
+      # 슬라이딩이고 이쪽은 발급 기준 절대 시각이다. JWT 사용자는 활동 중에도 30분이면 끊긴다.
+      ttl: 30m
 
   # 허용 origin. 콤마로 여러 개를 줄 수 있다 (WebConfig가 String[]로 받는다).
   # 기본값이 dev 프론트엔드라 로컬 개발·테스트는 설정 없이 그대로 돌아간다.

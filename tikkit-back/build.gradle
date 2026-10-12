@@ -76,6 +76,17 @@ dependencies {
     // 따라오므로 프로퍼티 한 개로 세션 저장소 전체가 켜지고 꺼진다.
     implementation 'org.springframework.boot:spring-boot-starter-session-data-redis'
 
+    // JWT (Task 026). Redis 세션과 비교하기 위한 stateless 전략.
+    //
+    // jjwt(api/impl/jackson 3줄 + 버전 직접 고정) 대신 이걸 고른 이유는 두 가지다.
+    // 1) 한 줄이고 버전은 Boot BOM의 spring-security-bom이 관리한다 — Boot 업그레이드 때
+    //    따로 챙길 것이 없다(Task 026_1에서 버전 고정 의존성이 비용이었다)
+    // 2) JwtEncoder/JwtDecoder/Jwt가 Spring Security 타입이라 필터에서 Authentication을
+    //    만들 때 변환 잡음이 없다
+    // spring-boot-starter-oauth2-resource-server는 쓰지 않는다 — Bearer 헤더 전제이고
+    // 자동설정이 spring.security.oauth2.resourceserver.* 설정을 요구한다. 라이브러리만 쓴다.
+    implementation 'org.springframework.security:spring-security-oauth2-jose'
+
     // 모니터링 (Task 025). starter-actuator가 spring-boot-starter-micrometer-metrics까지
     // 끌고 오므로 메트릭 스타터를 따로 선언하지 않는다.
     implementation 'org.springframework.boot:spring-boot-starter-actuator'

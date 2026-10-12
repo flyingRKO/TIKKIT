@@ -1,6 +1,8 @@
 package com.tikkit.api.security;
 
+import com.tikkit.api.security.jwt.JwtCookieAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -9,6 +11,8 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -27,6 +31,9 @@ public class SecurityConfig {
 
     private final ApiAuthenticationEntryPoint apiAuthenticationEntryPoint;
     private final ApiAccessDeniedHandler apiAccessDeniedHandler;
+    private final AuthProperties authProperties;
+    /** JwtConfig가 session-store=jwt일 때만 올라오므로 ObjectProvider로 받는다. */
+    private final ObjectProvider<JwtCookieAuthenticationFilter> jwtCookieAuthenticationFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -58,6 +65,18 @@ public class SecurityConfig {
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(apiAuthenticationEntryPoint)
                         .accessDeniedHandler(apiAccessDeniedHandler));
+
+        // JWT 전략에서만 달라지는 두 가지 (Task 026).
+        if (authProperties.sessionStore() == AuthProperties.SessionStore.JWT) {
+            // 세션을 아예 만들지 않는다. 이걸 빼면 서블릿 컨테이너가 세션을 만들어서
+            // "stateless라고 말하지만 실제로는 인스턴스마다 세션이 쌓이는" 상태가 된다.
+            http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+            // 쿠키의 토큰을 검증해 SecurityContext를 채운다. 인증 필터보다 앞에 둬야
+            // AuthorizationFilter가 판단할 시점에 주체가 들어 있다.
+            http.addFilterBefore(jwtCookieAuthenticationFilter.getObject(),
+                    UsernamePasswordAuthenticationFilter.class);
+        }
+
         return http.build();
     }
 
