@@ -211,6 +211,27 @@ docker compose -f docker-compose.prod.yml exec -T postgres \
 
 측정 결과와 한계는 [006. 성능 베이스라인](docs/improvements/006-performance-baseline.md)에 있습니다.
 
+Git Bash에서 돌린다면 위 커맨드 앞에 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`가
+필요합니다. MSYS2가 컨테이너 안의 경로인 `/scripts/...`를 `C:/Program Files/Git/scripts/...`로
+번역해서 k6가 스크립트를 못 찾습니다.
+
+#### 쿼리·인덱스 최적화 (Task 028)
+
+```bash
+cd tikkit-back && ./gradlew test --tests "*QueryCountTest"
+```
+
+경로별 쿼리 문장 수를 숫자로 고정한 테스트입니다. N+1은 응답 시간으로는 보이지 않아서
+(쿼리 하나가 0.3ms면 10개로 늘어도 3ms이고, p95가 2~7ms인 서비스에서는 노이즈에 묻힙니다)
+Hibernate `Statistics`로 문장 수를 직접 셉니다.
+
+**인덱스는 하나도 추가하지 않았습니다.** 600만 행에서 후보 7종을 `EXPLAIN (ANALYZE, BUFFERS)`로
+재봤는데 전부 근거가 없었습니다. 커버링 인덱스는 좌석맵의 버퍼 접근을 **-83%** 줄이지만 실행
+시간이 안 변합니다 — cold 측정에서 **실제 페이지 읽기가 196 vs 198로 같기** 때문이고,
+`Buffers: shared hit`은 I/O가 아니라 "버퍼를 몇 번 집었나"입니다.
+
+측정 상세와 기각 근거는 [007. 쿼리·인덱스 최적화](docs/improvements/007-query-optimization.md)에 있습니다.
+
 ## 포트폴리오 포인트 (예정)
 
 MVP 완성 이후 아래 항목을 순서대로 진행하며, 각 단계는 `docs/improvements/`에 **문제 → 재현 → 원인 분석 → 해결 → before/after 수치**로 기록할 예정입니다.

@@ -185,7 +185,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(1);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000002");
         given(reservationRepository.save(any()))
@@ -204,7 +204,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(1);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000003");
         given(reservationRepository.save(any()))
@@ -264,7 +264,7 @@ class ReservationServiceTest {
                 .email("test@tikkit.com").password("encoded").name("홍길동").phone("010-1111-2222")
                 .role(MemberRole.USER).build();
 
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member);
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000001");
 
@@ -287,7 +287,7 @@ class ReservationServiceTest {
     @DisplayName("존재하지 않는 등급이면 NOT_FOUND 예외를 던지고 저장하지 않는다")
     void 등급_없음() {
         // given
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.empty());
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.empty());
         ReservationCreateRequest request = request(1);
 
         // when & then
@@ -304,7 +304,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = requestFor(999L, 1);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -320,7 +320,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.plus(1, ChronoUnit.DAYS), now.plus(2, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(1);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -336,7 +336,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(2, ChronoUnit.DAYS), now.minus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(1);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -352,7 +352,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(1);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(reservationRepository.existsByMemberIdAndTicketGradeIdAndStatus(
                 MEMBER_ID, TICKET_GRADE_ID, ReservationStatus.PENDING)).willReturn(true);
 
@@ -372,7 +372,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(2);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000004");
         // 2석을 요청했는데 1석만 잡혔다 — 그 사이 누군가 먼저 가져갔다는 뜻이다.
@@ -397,7 +397,7 @@ class ReservationServiceTest {
         // given: 같은 테스트 안에서 성공 1건과 실패 1건을 차례로 만든다.
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         given(memberRepository.getReferenceById(MEMBER_ID)).willReturn(member());
         given(reservationNoGenerator.generate(any())).willReturn("TK260927-000010");
 
@@ -430,7 +430,7 @@ class ReservationServiceTest {
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request =
                 new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 2, List.of(1L, 1L));
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -447,7 +447,7 @@ class ReservationServiceTest {
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request =
                 new ReservationCreateRequest(SCHEDULE_ID, TICKET_GRADE_ID, 3, List.of(1L, 2L));
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
 
         // when & then
         assertThatThrownBy(() -> reservationService.create(MEMBER_ID, request))
@@ -463,7 +463,7 @@ class ReservationServiceTest {
         Instant now = Instant.now();
         TicketGrade grade = ticketGrade(now.minus(1, ChronoUnit.DAYS), now.plus(1, ChronoUnit.DAYS));
         ReservationCreateRequest request = request(2);
-        given(ticketGradeRepository.findById(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
+        given(ticketGradeRepository.findByIdWithSchedule(TICKET_GRADE_ID)).willReturn(Optional.of(grade));
         // 2석을 물어봤는데 1석만 이 회차·이 등급에 있다
         given(scheduleSeatRepository.countMatching(anyList(), eq(SCHEDULE_ID), eq(TICKET_GRADE_ID))).willReturn(1);
 

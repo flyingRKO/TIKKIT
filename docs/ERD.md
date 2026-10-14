@@ -17,6 +17,7 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 - 이메일처럼 대소문자를 구분하지 않아야 하는 유니크 컬럼은 `UNIQUE(lower(email))`로 선언한다(애플리케이션에서도 저장 전 소문자로 정규화).
 - 스키마는 Flyway로 관리하며 `ddl-auto: validate`를 사용한다. (`tikkit-back/CLAUDE.md`, Task 002)
 - 목록 조회의 복합 인덱스나 `pg_trgm` 기반 키워드 검색은 지금 미리 추가하지 않고 Task 028에서 `EXPLAIN ANALYZE` 근거로 결정한다. 참고로 `pg_trgm`은 3자 미만 패턴에는 인덱스를 타지 않아, 2음절 한글 제목(예: "햄릿") 검색에는 한계가 있다는 점을 그때 함께 검토한다.
+  - **Task 028 결론: 둘 다 추가하지 않았다.** 공연 1,008행에서 목록 조회는 page 0(인덱스 + Incremental Sort)과 page 49(Seq Scan + 전체 정렬)의 플랜이 갈리는데 **둘 다 0.55 ms**다. 키워드 검색은 1,000행이 전부 매칭되는 최악 패턴에서도 **1.33 ms**라 `pg_trgm` 근거가 안 나왔다. 위의 3자 미만 한계는 그대로 유효하므로, 공연 수가 수십만이 될 때 다시 판단한다.
 
 ### 의도적 비정규화
 
@@ -236,7 +237,13 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
 
 **Task 022 실측 결과 — 인덱스를 추가할 근거가 없었다.** dev 규모(`schedule_seats` 26,894행, 최대 회차 3,200석)에서 등급별 예매 가능 좌석 COUNT가 **0.82 ms**다. `UNIQUE(schedule_id, seat_id)`의 선두 컬럼이 `schedule_id`라서 Bitmap Index Scan으로 회차 범위가 좁혀지고 seq scan이 나지 않는다. 같은 조건에서 `schedule_seats`의 HOT 업데이트 비율은 **100%**(`n_tup_hot_upd` 6 / `n_tup_upd` 6)였다 — `fillfactor = 90`과 "인덱스를 걸지 않는다"가 둘 다 필요하다는 것도 같이 드러났다. 비교군인 `reservations`는 `status`를 갱신하는데 `idx_reservations_pending_expires_at`이 그 컬럼을 덮고 있어 HOT이 0%다.
 
-오히려 비싼 쪽은 좌석맵 조회(3,200석)로 **10.70 ms**였고, 원인은 `schedule_seats`가 아니라 `seats` 전체 Seq Scan(7,120행)과 3,200행 정렬이다. 그래서 V7(Task 027)에서 볼 것은 `idx(schedule_id, status)`가 아니라 좌석맵의 조인·정렬 전략이다. 측정 상세는 `docs/improvements/004-seatmap-migration.md` 8절에 있다.
+오히려 비싼 쪽은 좌석맵 조회(3,200석)로 **10.70 ms**였고, 원인은 `schedule_seats`가 아니라 `seats` 전체 Seq Scan(7,120행)과 3,200행 정렬이다. 그래서 V7(Task 028)에서 볼 것은 `idx(schedule_id, status)`가 아니라 좌석맵의 조인·정렬 전략이다. 측정 상세는 `docs/improvements/004-seatmap-migration.md` 8절에 있다.
+
+**Task 028 실측 결과 — 600만 행에서도 인덱스를 추가할 근거가 없었다. `V7`을 만들지 않았다.** 위 예측 중 정렬은 틀렸다 — 2,000행 quicksort는 **0.05 ms**이고 `seats` Seq Scan도 0.58 ms다. 비용은 `schedule_seats` Index Scan이 행마다 힙을 다시 보는 데 있었고, 그래서 후보가 정렬 인덱스가 아니라 **커버링 인덱스**(`(schedule_id) INCLUDE (seat_id, status, ticket_grade_id)`)로 바뀌었다. 같은 조건(VACUUM 후, 3회 중앙값)으로 A/B를 재니 좌석맵 **2.423 → 2.469 ms**로 **차이가 없었다**. 버퍼 접근은 2,130 → 354(-83%)로 줄었지만 shared buffers를 비운 cold 측정에서 **실제 페이지 읽기가 196 vs 198로 같았다** — 한 회차의 2,000행이 물리적으로 42페이지에 뭉쳐 있어서, 힙을 안 보면 그만큼 인덱스 페이지를 대신 읽는다. 대가는 **338 MB**(heap 599 MB의 56%)와 HOT 파괴다.
+
+같은 측정에서 `schedule_seats`의 HOT 비율이 **100.0%**(3회 모두, 선점·확정·취소 약 15,500건 UPDATE)로 확인됐다 — Task 022의 "표본 6건" 한계가 닫혔다. `fillfactor = 90` + "인덱스를 걸지 않는다"가 데이터를 26,894행에서 600만 행으로 늘려도 유지된다.
+
+**`idx(reservation_id)`도 기각했다.** 예약 100건 물리 삭제가 **26,906 ms → 2.71 ms**(약 9,900배)로 빨라지지만, HOT 비율이 **100% → 34%**로 떨어지고 예매 p95가 **+9.5%**(7.77 → 8.50 ms) 느려진다. 34%가 0이 아닌 이유는 좌석을 바꾸는 UPDATE 셋 중 `markSold`만 `reservation_id`를 건드리지 않아 HOT으로 남기 때문이다. **운영에서 예약을 물리 삭제하지 않는다** — 예약 상태 머신에 물리 삭제가 없고(`CANCELLED`/`EXPIRED`로 남긴다), 좌석 반환은 위 쿼리처럼 `reservation_seats`를 경유한다. 측정 상세는 `docs/improvements/007-query-optimization.md` 4.9절.
 
 **등급 혼합 정책**: "한 예약 = 한 등급"을 Phase 6 이후에도 유지한다. `reservations.ticket_grade_id`/`unit_price`/`quantity`는 제거하지 않고 그대로 쓰며, 예매 API에 `seatIds`가 추가된다. 선택한 모든 좌석이 동일한 `ticket_grade_id`에 속하는지는 여러 테이블에 걸친 조건이라 DB CHECK로 표현할 수 없으므로, 서비스 레이어에서 애플리케이션 검증으로 강제한다(Task 022).
 
@@ -340,5 +347,5 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V5_1 | 개발용 배치도 시드 — 좌표 보정·구역명·상태 샘플 (db/seed, dev 전용) | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |
 | V6_1 | `shedlock` 테이블 생성 (다중 인스턴스 배치 중복 실행 방지) | 026 |
-| V7 | 조회 성능 개선을 위한 인덱스 추가 | 027 |
+| V7 | ~~조회 성능 개선을 위한 인덱스 추가~~ — **측정 결과 근거가 없어 만들지 않았다** (2절, 007 문서). 번호는 비워 둔다 | 028 |
 | V8 | 대기열 활성화 플래그 (`schedules.queue_enabled`) | 031 |
