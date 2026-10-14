@@ -150,7 +150,9 @@ public class ReservationService {
      * 잡을 수가 없다. 전환 전에는 재고 차감이 먼저였는데 순서가 뒤집힌 지점이다.
      */
     private ReservationResponse createPending(Long memberId, ReservationCreateRequest request) {
-        TicketGrade ticketGrade = ticketGradeRepository.findById(request.ticketGradeId())
+        // 회차를 fetch join으로 함께 받는다. findById로 등급만 읽으면 바로 아래 isBookingOpen에서
+        // Schedule 프록시가 초기화되면서 SELECT가 한 번 더 나간다 (Task 028, 왕복 7 -> 6).
+        TicketGrade ticketGrade = ticketGradeRepository.findByIdWithSchedule(request.ticketGradeId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
 
         Schedule schedule = ticketGrade.getSchedule();

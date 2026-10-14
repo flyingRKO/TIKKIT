@@ -3,10 +3,13 @@ package com.tikkit.api.domain.performance.repository;
 import com.querydsl.core.types.Projections;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.tikkit.api.domain.performance.dto.TicketGradeRow;
+import com.tikkit.api.domain.performance.entity.QSchedule;
 import com.tikkit.api.domain.performance.entity.QTicketGrade;
+import com.tikkit.api.domain.performance.entity.TicketGrade;
 import lombok.RequiredArgsConstructor;
 
 import java.util.List;
+import java.util.Optional;
 
 @RequiredArgsConstructor
 public class TicketGradeRepositoryImpl implements TicketGradeRepositoryCustom {
@@ -14,6 +17,7 @@ public class TicketGradeRepositoryImpl implements TicketGradeRepositoryCustom {
     private final JPAQueryFactory queryFactory;
 
     private static final QTicketGrade ticketGrade = QTicketGrade.ticketGrade;
+    private static final QSchedule schedule = QSchedule.schedule;
 
     @Override
     public List<TicketGradeRow> findRowsByScheduleId(Long scheduleId) {
@@ -25,5 +29,15 @@ public class TicketGradeRepositoryImpl implements TicketGradeRepositoryCustom {
                 // grade는 문자열로 매핑돼 있어 이름 기준 정렬(A,R,S,VIP)이 안 되므로 price 내림차순으로 대신한다.
                 .orderBy(ticketGrade.price.desc())
                 .fetch();
+    }
+
+    @Override
+    public Optional<TicketGrade> findByIdWithSchedule(Long id) {
+        TicketGrade result = queryFactory
+                .selectFrom(ticketGrade)
+                .join(ticketGrade.schedule, schedule).fetchJoin()
+                .where(ticketGrade.id.eq(id))
+                .fetchOne();
+        return Optional.ofNullable(result);
     }
 }

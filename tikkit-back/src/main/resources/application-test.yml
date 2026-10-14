@@ -5,4 +5,7 @@ spring:
     properties:
       hibernate:
         format_sql: true
+        # 쿼리 카운트 하네스(QueryCounter)가 Statistics로 실행된 JDBC 문장 수를 읽는다 (Task 028).
+        # test 프로필에서만 켠다 — 운영에서 켜면 미터마다 동기화 비용이 붙는다.
+        generate_statistics: true
     show-sql: true
