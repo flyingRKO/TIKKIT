@@ -91,15 +91,15 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
     }
 
     @Test
-    @DisplayName("좌석맵 조회는 좌석 수와 무관하게 배치·상태 2문장을 보낸다 (Task 029)")
+    @DisplayName("좌석맵 조회는 좌석 수와 무관하게 회차 존재 확인·좌석 2문장을 보낸다")
     void 좌석맵_2문장() {
         long queries = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
 
-        // 문장 수는 Task 028과 같은 2인데 내용이 바뀌었다. 전에는 (existsById + 좌석 전체)였고
-        // 지금은 (배치 + 상태)다 — 배치만 캐시 대상이라 쪼갰다. 캐시가 꺼진 이 테스트에서는
-        // seats 조인이 들어간 큰 쿼리 하나가 existsById 대신 상태 조회로 바뀐 셈이라,
-        // 문장 수는 같지만 읽는 행 수는 늘었다. 그 대가가 캐시 이득보다 큰지는 부하 측정이 판정한다
-        // (docs/improvements/008-caching.md).
+        // 좌석이 10석이든 2,000석이든 문장 수는 같아야 한다 — 늘어나면 좌석마다 seat를 당겨 쓴 것이다.
+        //
+        // Task 029에서 이걸 (배치 + 상태) 두 쿼리로 쪼개 배치만 캐시해 히트 시 1문장으로 줄여
+        // 봤지만 되돌렸다. 캐시 항목이 2,000석에 337,885바이트라 Redis 왕복·역직렬화가 쿼리보다
+        // 비쌌다 — **문장 수가 줄어도 더 느릴 수 있다**(008 4절). 그래서 이 숫자는 Task 028과 같다.
         assertThat(queries).isEqualTo(2);
         assertThat(scheduleService.getSeats(scheduleId)).hasSize(10);
     }

@@ -4,7 +4,7 @@ import com.querydsl.core.Tuple;
 import com.querydsl.core.types.Projections;
 import com.querydsl.core.types.dsl.NumberExpression;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
+import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.entity.QScheduleSeat;
 import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.venue.entity.QSeat;
@@ -28,43 +28,24 @@ public class ScheduleSeatRepositoryImpl implements ScheduleSeatRepositoryCustom 
      * {@code schedule_id}라서 회차 범위는 그 인덱스로 좁혀진다. 인덱스를 일부러 안 둔 이유는
      * 선점·해제 UPDATE의 HOT 업데이트를 지키려는 것이다 (V4 주석, docs/ERD.md 2절).
      * <p>
-     * Task 029에서 기존 {@code findSeatResponsesByScheduleId}를 이 메서드와
-     * {@link #findSeatStatusesByScheduleId}로 쪼갰다. 응답 8필드 중 7개가 불변이라
-     * 그쪽만 캐시하려는 것이다. 빠지는 비용은 {@code seats} 조인(Task 028이 Seq Scan 0.58ms로 실측)과
-     * 2,000행 정렬(0.05ms)이고, 대가는 왕복이 1 → 2로 늘어나는 것이다.
-     * <b>캐시가 꺼져 있으면 이 분리는 순손실이다</b> — 7절 수치로 판정한다.
+     * Task 029에서 이걸 "좌표·등급"과 "상태" 두 쿼리로 쪼개 앞쪽만 캐시해 봤다. 응답 8필드 중
+     * 7개가 불변이라 캐시할 수 있는 모양이긴 했다. 그런데 캐시를 꺼 두면 왕복이 1 → 2로 늘어
+     * 좌석맵 p95가 6.63 → 8.62ms가 되고, Redis 캐시를 켜도 7.22ms로 원래보다 느렸다 —
+     * 캐시 항목이 337,885바이트라 받아서 2,000개 record로 역직렬화하는 비용이 이 쿼리를 넘는다.
+     * <b>적중률 99.97%에서도 그랬다.</b> 그래서 단일 쿼리로 되돌렸다
+     * ({@code docs/improvements/008-caching.md} 4절).
      */
     @Override
-    public List<ScheduleSeatLayoutRow> findSeatLayoutByScheduleId(Long scheduleId) {
+    public List<ScheduleSeatResponse> findSeatResponsesByScheduleId(Long scheduleId) {
         return queryFactory
-                .select(Projections.constructor(ScheduleSeatLayoutRow.class,
+                .select(Projections.constructor(ScheduleSeatResponse.class,
                         scheduleSeat.id, seat.section, seat.rowLabel, seat.seatNumber,
-                        seat.posX, seat.posY, scheduleSeat.ticketGrade.id))
+                        seat.posX, seat.posY, scheduleSeat.status, scheduleSeat.ticketGrade.id))
                 .from(scheduleSeat)
                 .join(scheduleSeat.seat, seat)
                 .where(scheduleSeat.schedule.id.eq(scheduleId))
                 .orderBy(seat.posY.asc(), seat.posX.asc())
                 .fetch();
-    }
-
-    /**
-     * 상태만 읽는다. {@code seats} 조인도 정렬도 없다 — 호출 측이 캐시된 배치도 순서에 맞춰
-     * 이 Map을 붙이므로 여기서 정렬할 이유가 없다.
-     * <p>
-     * {@code Tuple}을 밖으로 내보내지 않으려고 Impl 안에서 Map으로 접는다
-     * (CLAUDE.md 프로젝션 규칙).
-     */
-    @Override
-    public Map<Long, SeatStatus> findSeatStatusesByScheduleId(Long scheduleId) {
-        List<Tuple> rows = queryFactory
-                .select(scheduleSeat.id, scheduleSeat.status)
-                .from(scheduleSeat)
-                .where(scheduleSeat.schedule.id.eq(scheduleId))
-                .fetch();
-
-        return rows.stream().collect(Collectors.toMap(
-                row -> row.get(scheduleSeat.id),
-                row -> row.get(scheduleSeat.status)));
     }
 
     @Override

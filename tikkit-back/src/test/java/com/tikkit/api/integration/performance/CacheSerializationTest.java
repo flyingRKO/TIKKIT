@@ -3,7 +3,6 @@ package com.tikkit.api.integration.performance;
 import com.tikkit.api.common.config.CacheNames;
 import com.tikkit.api.domain.performance.dto.PerformanceDetailResponse;
 import com.tikkit.api.domain.performance.dto.PerformanceListPage;
-import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
 import com.tikkit.api.domain.performance.dto.TicketGradeRow;
 import com.tikkit.api.domain.performance.service.CatalogCache;
 import com.tikkit.api.domain.performance.service.PerformanceService;
@@ -74,20 +73,6 @@ class CacheSerializationTest extends AbstractRedisCacheContainerTest {
                 // "값은 같은데 scale이 달라졌다"와 "값이 틀렸다"를 구분한다.
                 .isEqualByComparingTo(written.getFirst().price())
                 .isEqualTo(written.getFirst().price());
-    }
-
-    @Test
-    @DisplayName("좌석 배치 목록은 record 원소 그대로 왕복한다")
-    void 좌석_배치_왕복() {
-        List<ScheduleSeatLayoutRow> written = catalogCache.seatLayout(scheduleId);
-        assertThat(written).hasSize(3);
-
-        awaitCached(CacheNames.SEAT_LAYOUT, scheduleId);
-        Object cached = cacheManager.getCache(CacheNames.SEAT_LAYOUT).get(scheduleId).get();
-
-        @SuppressWarnings("unchecked")
-        List<ScheduleSeatLayoutRow> read = (List<ScheduleSeatLayoutRow>) cached;
-        assertThat(read).containsExactlyElementsOf(written);
     }
 
     @Test

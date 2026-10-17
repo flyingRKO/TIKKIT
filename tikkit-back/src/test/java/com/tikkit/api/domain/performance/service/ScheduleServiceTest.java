@@ -2,7 +2,6 @@ package com.tikkit.api.domain.performance.service;
 
 import com.tikkit.api.common.exception.BusinessException;
 import com.tikkit.api.common.exception.ErrorCode;
-import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
 import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeRow;
@@ -29,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class ScheduleServiceTest {
@@ -40,7 +40,7 @@ class ScheduleServiceTest {
     private ScheduleSeatRepository scheduleSeatRepository;
 
     /**
-     * 불변 부분(등급 가격, 좌석 배치)만 캐시하는 계층 (Task 029).
+     * 등급 가격(불변)만 캐시하는 계층 (Task 029). 좌석맵은 캐시 대상이 아니다.
      * 여기서는 캐시 동작이 아니라 <b>조립 로직</b>을 보므로 목으로 둔다 —
      * 실제 캐시 적중은 {@code CacheIntegrationTest}가 Redis 컨테이너로 검증한다.
      */
@@ -122,60 +122,35 @@ class ScheduleServiceTest {
     }
 
     @Test
-    @DisplayName("좌석맵은 캐시된 배치에 실시간 상태를 붙여 만든다 — 배치 순서가 응답 순서다 (Task 029)")
-    void 좌석맵_배치와_상태_조립() {
-        // given: 배치는 posY asc, posX asc 순서로 캐시돼 있다
-        given(catalogCache.seatLayout(7L)).willReturn(List.of(
-                new ScheduleSeatLayoutRow(100L, "A", "1", 1, 1, 1, 10L),
-                new ScheduleSeatLayoutRow(101L, "A", "1", 2, 2, 1, 10L),
-                new ScheduleSeatLayoutRow(102L, "A", "2", 1, 1, 2, 11L)));
-        // 상태는 Map이라 순서가 없다. 그래도 응답은 배치 순서를 따라야 한다.
-        given(scheduleSeatRepository.findSeatStatusesByScheduleId(7L)).willReturn(Map.of(
-                102L, SeatStatus.SOLD,
-                100L, SeatStatus.AVAILABLE,
-                101L, SeatStatus.HELD));
-
-        // when
-        List<ScheduleSeatResponse> result = scheduleService.getSeats(7L);
-
-        // then
-        assertThat(result).containsExactly(
+    @DisplayName("좌석맵은 캐시를 거치지 않는다 — 조회 결과를 그대로 내려준다")
+    void 좌석맵은_캐시를_거치지_않는다() {
+        // Task 029에서 배치(불변)와 상태(실시간)로 쪼개 앞쪽만 캐시해 봤고 측정 후 되돌렸다.
+        // 캐시 항목이 2,000석에 337,885바이트라 Redis 왕복·역직렬화가 쿼리보다 비쌌다
+        // (docs/improvements/008-caching.md 4절). 그래서 CatalogCache를 타지 않는다.
+        given(scheduleRepository.existsById(7L)).willReturn(true);
+        given(scheduleSeatRepository.findSeatResponsesByScheduleId(7L)).willReturn(List.of(
                 new ScheduleSeatResponse(100L, "A", "1", 1, 1, 1, SeatStatus.AVAILABLE, 10L),
-                new ScheduleSeatResponse(101L, "A", "1", 2, 2, 1, SeatStatus.HELD, 10L),
-                new ScheduleSeatResponse(102L, "A", "2", 1, 1, 2, SeatStatus.SOLD, 11L));
-        verify(scheduleRepository, never()).existsById(7L);
-    }
-
-    @Test
-    @DisplayName("상태를 찾을 수 없는 좌석은 응답에서 빠진다 — status가 null인 좌석을 내려주면 FE가 깨진다")
-    void 상태없는_좌석은_제외() {
-        // given: 캐시된 배치에는 있는데 상태 조회 결과에 없는 좌석(101L)이 섞였다.
-        // 운영에 좌석을 물리 삭제하는 경로는 없지만, 캐시가 상태보다 오래 사는 구조라 방어한다.
-        given(catalogCache.seatLayout(7L)).willReturn(List.of(
-                new ScheduleSeatLayoutRow(100L, "A", "1", 1, 1, 1, 10L),
-                new ScheduleSeatLayoutRow(101L, "A", "1", 2, 2, 1, 10L)));
-        given(scheduleSeatRepository.findSeatStatusesByScheduleId(7L))
-                .willReturn(Map.of(100L, SeatStatus.AVAILABLE));
+                new ScheduleSeatResponse(101L, "A", "1", 2, 2, 1, SeatStatus.HELD, 10L)));
 
         // when
         List<ScheduleSeatResponse> result = scheduleService.getSeats(7L);
 
         // then
-        assertThat(result).singleElement()
-                .extracting(ScheduleSeatResponse::id).isEqualTo(100L);
+        assertThat(result).extracting(ScheduleSeatResponse::status)
+                .containsExactly(SeatStatus.AVAILABLE, SeatStatus.HELD);
+        verifyNoInteractions(catalogCache);
     }
 
     @Test
-    @DisplayName("배치가 비었고 회차도 없으면 NOT_FOUND를 던지고 상태는 조회하지 않는다")
+    @DisplayName("존재하지 않는 회차의 좌석맵은 NOT_FOUND를 던지고 좌석은 조회하지 않는다")
     void 존재하지_않는_회차_좌석맵() {
         // given
-        given(catalogCache.seatLayout(7L)).willReturn(List.of());
         given(scheduleRepository.existsById(7L)).willReturn(false);
 
         // when & then
         assertThatThrownBy(() -> scheduleService.getSeats(7L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.NOT_FOUND);
-        verify(scheduleSeatRepository, never()).findSeatStatusesByScheduleId(7L);
+        verify(scheduleSeatRepository, never()).findSeatResponsesByScheduleId(7L);
     }
 }

@@ -89,10 +89,10 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         // RedisCacheManager가 올라와야 적중률 지표(cache_gets)가 Redis 기준으로 집계된다.
         assertThat(cacheManager).isInstanceOf(RedisCacheManager.class);
         // 미리 만들지 않으면 첫 요청 전까지 지표 시리즈가 없어서 "적중률 0"과 "계측 없음"이
-        // 구분되지 않는다. 응답 바이트 캐시는 기본 비활성이라 목록에 없어야 한다.
+        // 구분되지 않는다. 좌석맵은 캐싱을 기각했으므로 목록에 없어야 한다 (008 4절).
         assertThat(cacheManager.getCacheNames())
                 .containsExactlyInAnyOrderElementsOf(CacheNames.TTLS.keySet())
-                .doesNotContain(CacheNames.SEATMAP_RESPONSE);
+                .doesNotContain("seatLayout", "seatmapResponse");
     }
 
     @Test
@@ -159,20 +159,25 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         assertThat(hit).isEqualTo(1);
     }
 
-    @Test
-    @DisplayName("좌석맵은 배치만 캐시하므로 두 번째 호출도 상태 조회 1문장은 남는다")
-    void 좌석맵_히트는_1문장() {
-        long miss = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
-        long hit = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
 
-        assertThat(miss).isEqualTo(2);
-        assertThat(hit).isEqualTo(1);
+    @Test
+    @DisplayName("좌석맵은 캐시를 타지 않는다 — 두 번 불러도 문장 수가 같다")
+    void 좌석맵은_캐시되지_않는다() {
+        long first = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
+        long second = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
+
+        // 회차 존재 확인 + 좌석 조회 = 2문장. 캐시를 켜도 줄지 않는다.
+        // Task 029에서 배치(불변)만 캐시해 히트 시 1문장으로 줄여 봤지만, 캐시 항목이
+        // 2,000석에 337,885바이트라 Redis 왕복·역직렬화가 쿼리보다 비싸서 되돌렸다 —
+        // **문장 수가 줄어도 더 느릴 수 있다**는 기록이다 (008 4절).
+        assertThat(first).isEqualTo(second).isEqualTo(2);
+        assertThat(cacheManager.getCacheNames()).doesNotContain("seatLayout");
     }
 
     @Test
-    @DisplayName("캐시된 배치도 좌석 상태는 즉시 반영한다 — 선점 직후 재조회에 HELD가 보인다")
-    void 상태는_캐시되지_않는다() {
-        // given: 좌석맵을 한 번 조회해 배치를 캐시에 올린다
+    @DisplayName("좌석 상태는 선점 직후 재조회에 즉시 보인다 — 캐시가 상태를 지연시키지 않는다")
+    void 좌석_상태는_즉시_반영된다() {
+        // given
         List<ScheduleSeatResponse> before = scheduleService.getSeats(scheduleId);
         assertThat(before).allMatch(seat -> seat.status() == SeatStatus.AVAILABLE);
         Long targetSeatId = before.getFirst().id();
@@ -180,18 +185,14 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         // when: 실제 선점 경로로 좌석 하나를 잡는다.
         // DB를 직접 UPDATE하지 않는 이유는 ck_schedule_seats_status_holder다 —
         // HELD/SOLD는 reservation_id가 반드시 있어야 해서 status만 바꿀 수 없다(V4의 의도적 설계).
-        // 서비스를 쓰면 제약을 지키면서 "사용자가 좌석을 잡았다"는 실제 상황이 된다.
         reservationService.create(memberId, new ReservationCreateRequest(
                 scheduleId, gradeId, 1, List.of(targetSeatId)));
 
-        // then: 배치는 캐시에서 오지만 상태는 새로 읽으므로 바로 보인다
-        List<ScheduleSeatResponse> after = scheduleService.getSeats(scheduleId);
-        assertThat(after)
+        // then
+        assertThat(scheduleService.getSeats(scheduleId))
                 .filteredOn(seat -> seat.id().equals(targetSeatId))
                 .singleElement()
                 .extracting(ScheduleSeatResponse::status).isEqualTo(SeatStatus.HELD);
-        // 배치는 여전히 캐시에 있다 (상태가 바뀌어도 캐시를 버리지 않는다)
-        awaitCached(CacheNames.SEAT_LAYOUT, scheduleId);
     }
 
     @Test
@@ -201,14 +202,10 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         // 쏘는 것만으로 TTL 10분짜리 빈 항목이 쌓인다 — @Cacheable(unless)로 막았다.
         Long missingId = scheduleId + 100_000L;
 
-        assertThatThrownBy(() -> scheduleService.getSeats(missingId))
-                .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.NOT_FOUND);
         assertThatThrownBy(() -> scheduleService.getTicketGrades(missingId))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.NOT_FOUND);
 
-        assertThat(cacheManager.getCache(CacheNames.SEAT_LAYOUT).get(missingId)).isNull();
         assertThat(cacheManager.getCache(CacheNames.GRADE_PRICES).get(missingId)).isNull();
     }
 }

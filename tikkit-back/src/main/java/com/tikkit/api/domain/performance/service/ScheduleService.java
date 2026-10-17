@@ -2,11 +2,9 @@ package com.tikkit.api.domain.performance.service;
 
 import com.tikkit.api.common.exception.BusinessException;
 import com.tikkit.api.common.exception.ErrorCode;
-import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
 import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeRow;
-import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.performance.repository.ScheduleRepository;
 import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -15,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -97,40 +94,20 @@ public class ScheduleService {
      * 회차의 모든 좌석을 평면 배열로 한 번에 내려준다. 큰 공연장이면 수천 건이라 응답이 수백 KB가 되는데,
      * 배치도는 어차피 전부 그려야 하므로 페이지를 쪼개는 게 의미가 없다.
      * <p>
-     * <b>Task 029: 배치(좌표·등급)와 상태를 분리했다.</b> 응답 8필드 중 7개가 불변이라 그쪽만
-     * 캐시하고, {@code status}는 매번 조회해 여기서 합친다. 그래서 선점 직후 재조회하면 HELD가
-     * 즉시 보인다 — 캐시가 좌석 상태를 지연시키지 않는다.
+     * <b>Task 029: 캐시하지 않는다.</b> 응답 8필드 중 7개가 불변이라 그쪽만 캐시하고 상태는
+     * 매번 읽는 구조를 만들어 실측했는데, 캐시 항목이 2,000석에 337,885바이트라서 Redis에서
+     * 받아 역직렬화하는 비용이 이 쿼리 하나보다 비쌌다. 적중률 99.97%에서도 캐시를 켠 쪽이
+     * 느렸고, 그 비용은 좌석 수에 비례해 같이 커진다. 좌석맵의 확장성 해법은 캐싱이 아니라
+     * 응답 크기를 줄이는 것이고 그건 Task 030이 맡는다
+     * ({@code docs/improvements/008-caching.md} 4절).
      * <p>
-     * 순서는 캐시된 배치도가 들고 있다({@code posY asc, posX asc}). 상태는 Map으로 받아 그 순서에
-     * 맞춰 붙인다.
-     * <p>
-     * 상태 Map에 키가 없는 좌석은 그 사이 삭제된 것인데 운영에 그 경로가 없다
-     * ({@code docs/ERD.md}: 예약·좌석을 물리 삭제하지 않는다). 그래도 캐시가 상태보다 오래 살 수
-     * 있는 구조라서 방어적으로 건너뛴다 — 없는 좌석을 {@code null} 상태로 내려주면 FE가 깨진다.
+     * 그래서 좌석 좌표는 공연장마다 고정이지만 상태와 함께 매번 조회한다.
      */
     public List<ScheduleSeatResponse> getSeats(Long scheduleId) {
-        return buildTimer.record(() -> buildSeats(scheduleId));
-    }
-
-    private List<ScheduleSeatResponse> buildSeats(Long scheduleId) {
-        List<ScheduleSeatLayoutRow> layout = catalogCache.seatLayout(scheduleId);
-        if (layout.isEmpty()) {
+        return buildTimer.record(() -> {
             requireScheduleExists(scheduleId);
-            return List.of();
-        }
-
-        Map<Long, SeatStatus> statuses = scheduleSeatRepository.findSeatStatusesByScheduleId(scheduleId);
-
-        List<ScheduleSeatResponse> seats = new ArrayList<>(layout.size());
-        for (ScheduleSeatLayoutRow row : layout) {
-            SeatStatus status = statuses.get(row.id());
-            if (status == null) {
-                continue;
-            }
-            seats.add(new ScheduleSeatResponse(row.id(), row.section(), row.rowLabel(), row.seatNumber(),
-                    row.posX(), row.posY(), status, row.ticketGradeId()));
-        }
-        return seats;
+            return scheduleSeatRepository.findSeatResponsesByScheduleId(scheduleId);
+        });
     }
 
     private void requireScheduleExists(Long scheduleId) {

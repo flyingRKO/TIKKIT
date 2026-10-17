@@ -106,12 +106,12 @@ class CacheEvictionTest extends AbstractRedisCacheContainerTest {
     }
 
     @Test
-    @DisplayName("좌석 배치 캐시는 공연 캐시가 비는 배치에서도 살아남는다 — 불변이라 비울 이유가 없다")
+    @DisplayName("등급 가격 캐시는 공연 캐시가 비는 배치에서도 살아남는다 — 불변이라 비울 이유가 없다")
     void 불변_캐시는_유지() {
-        // given: 좌석 배치와 공연 상세를 모두 캐시에 올린다
-        scheduleService.getSeats(scheduleId);
+        // given: 등급 가격과 공연 상세를 모두 캐시에 올린다
+        scheduleService.getTicketGrades(scheduleId);
         performanceService.getDetail(performanceId);
-        awaitCached(CacheNames.SEAT_LAYOUT, scheduleId);
+        awaitCached(CacheNames.GRADE_PRICES, scheduleId);
 
         // when: 파생값이 실제로 바뀌는 배치를 돌린다 (공연 캐시는 비워지는 조건)
         jdbcTemplate.update("""
@@ -123,9 +123,9 @@ class CacheEvictionTest extends AbstractRedisCacheContainerTest {
                 """, scheduleId);
         scheduler.run();
 
-        // then: 공연 캐시는 비었지만 좌석 배치는 남아 있다.
-        // 좌석 좌표는 공연 판매 상태와 무관하다 — 같이 날리면 2,000행 조회를 공짜로 다시 하게 된다.
+        // then: 공연 캐시는 비었지만 등급 가격은 남아 있다.
+        // 가격은 공연 판매 상태와 무관하다 — 같이 날리면 멀쩡한 캐시를 공짜로 버리는 셈이다.
         awaitPerformanceCachesCleared(performanceId, listCacheKey());
-        awaitCached(CacheNames.SEAT_LAYOUT, scheduleId);
+        awaitCached(CacheNames.GRADE_PRICES, scheduleId);
     }
 }

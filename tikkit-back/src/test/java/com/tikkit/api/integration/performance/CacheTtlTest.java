@@ -70,22 +70,16 @@ class CacheTtlTest extends AbstractRedisCacheContainerTest {
                 .isPositive()
                 .isLessThanOrEqualTo(60L);
     }
-
     @Test
-    @DisplayName("등급 가격·좌석 배치는 불변이라 10분 TTL이 걸린다")
+    @DisplayName("등급 가격은 불변이라 10분 TTL이 걸린다 — 공연 캐시와 값이 달라야 한다")
     void 불변_캐시_TTL_10분() {
         catalogCache.gradePrices(scheduleId);
-        catalogCache.seatLayout(scheduleId);
         awaitCached(CacheNames.GRADE_PRICES, scheduleId);
-        awaitCached(CacheNames.SEAT_LAYOUT, scheduleId);
 
         long tenMinutes = Duration.ofMinutes(10).toSeconds();
-        // 60초보다 크다는 것까지 확인한다 — 전부 cacheDefaults로 뭉개지면 네 캐시의 TTL이
+        // 60초보다 크다는 것까지 확인한다 — 전부 cacheDefaults로 뭉개지면 세 캐시의 TTL이
         // 같아지는데, 값만 보면 "걸려 있다"로 통과할 수 있다.
         assertThat(ttlOf(CacheNames.GRADE_PRICES, scheduleId))
-                .isGreaterThan(60L)
-                .isLessThanOrEqualTo(tenMinutes);
-        assertThat(ttlOf(CacheNames.SEAT_LAYOUT, scheduleId))
                 .isGreaterThan(60L)
                 .isLessThanOrEqualTo(tenMinutes);
     }

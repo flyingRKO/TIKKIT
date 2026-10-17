@@ -1,14 +1,10 @@
 package com.tikkit.api.common.config;
 
-import com.github.benmanes.caffeine.cache.Caffeine;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
-import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.cache.support.NoOpCacheManager;
-import org.springframework.cache.support.SimpleCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -20,10 +16,7 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 
-import java.time.Duration;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,15 +32,14 @@ import java.util.Map;
  * 지금 캐시 대상은 전부 읽기 전용 조회라서 문제가 없다.
  *
  * <h2>왜 CacheManager를 토글로 갈아끼우나</h2>
- * Spring Cache 추상화 덕에 {@code @Cacheable}을 붙인 코드는 저장소를 모른다. 그래서 같은 코드로
- * Caffeine(로컬)과 Redis(공유)를 비교할 수 있다. {@code NONE}은 {@link NoOpCacheManager}라
- * 어노테이션이 전부 통과만 한다 — 조건부 빈으로 어노테이션을 지우지 않아도 캐시가 완전히 꺼진다.
+ * {@code NONE}은 {@link NoOpCacheManager}라 {@code @Cacheable}이 전부 통과만 한다. 조건부 빈으로
+ * 어노테이션을 지우지 않아도 캐시가 완전히 꺼지고, 그래서 "캐시 없는 기준선"을 언제든 다시 잴 수
+ * 있다. 저장소 선택이 Redis 하나뿐인 이유는 {@link CacheProperties} Javadoc에 있다.
  *
  * <h2>통계를 왜 명시적으로 켜나</h2>
  * Micrometer가 {@code cache.gets{result=hit|miss}}를 읽으려면 캐시 구현이 통계를 기록해야 한다.
- * Redis는 {@code enableStatistics()}, Caffeine은 {@code recordStats()}가 그 스위치다. 끄면 적중률
- * 패널이 영구히 0으로 나오고, 그러면 006이 요구한 "적중률을 따로 재야 p95 개선이 캐시 덕인지
- * 확인된다"를 충족할 수 없다.
+ * {@code enableStatistics()}가 그 스위치다. 끄면 적중률 패널이 영구히 비어서 006이 요구한
+ * "적중률을 따로 재야 p95 개선이 캐시 덕인지 확인된다"를 충족할 수 없다.
  * <p>
  * 그리고 캐시를 {@link CacheNames#TTLS}에 선언한 이름으로 <b>기동 시점에 미리 만든다</b>.
  * lazy로 두면 첫 요청 전까지 지표 시리즈가 없어서 Grafana가 "No data"를 띄우고, 적중률 0과
@@ -67,58 +59,18 @@ public class CacheConfig {
                                      ObjectProvider<RedisConnectionFactory> connectionFactory) {
         return switch (properties.type()) {
             case NONE -> new NoOpCacheManager();
-            case CAFFEINE -> caffeineCacheManager(properties);
-            case REDIS -> redisCacheManager(properties, connectionFactory.getObject());
+            case REDIS -> redisCacheManager(connectionFactory.getObject());
         };
-    }
-
-    /**
-     * Caffeine은 CacheManager 단위로 하나의 spec만 받으므로 TTL이 캐시마다 다르면
-     * {@code CaffeineCacheManager}를 쓸 수 없다. 캐시를 개별로 만들어
-     * {@link SimpleCacheManager}에 등록한다.
-     */
-    private CacheManager caffeineCacheManager(CacheProperties properties) {
-        List<Cache> caches = new ArrayList<>();
-        ttlsWithExperiment(properties).forEach((name, ttl) -> caches.add(new CaffeineCache(name,
-                Caffeine.newBuilder()
-                        .expireAfterWrite(ttl)
-                        // 로컬 캐시는 힙을 먹는다. seatLayout이 회차당 2,000석이라 상한이 없으면
-                        // 회차를 훑는 것만으로 힙이 올라간다 — 006이 잰 베이스라인 힙(188.8MB)과
-                        // 비교할 수 있게 상한을 둔다. Redis 군의 maxmemory와 같은 역할이다.
-                        .maximumSize(2_000)
-                        .recordStats()
-                        .build())));
-
-        SimpleCacheManager manager = new SimpleCacheManager();
-        manager.setCaches(caches);
-        return manager;
     }
 
     /**
      * Redis 캐시. 캐시마다 TTL이 다르므로 {@code withInitialCacheConfigurations}로 이름별 설정을 준다.
      */
-    private CacheManager redisCacheManager(CacheProperties properties, RedisConnectionFactory factory) {
+    private CacheManager redisCacheManager(RedisConnectionFactory factory) {
         RedisCacheConfiguration base = defaultCacheConfiguration();
 
         Map<String, RedisCacheConfiguration> perCache = new HashMap<>();
-        ttlsWithExperiment(properties).forEach((name, ttl) -> perCache.put(name, base.entryTtl(ttl)));
-
-        // 좌석맵 응답 바이트 캐시만 값 직렬화를 통과(raw)로 바꾼다.
-        //
-        // 이 캐시의 값은 이미 직렬화된 JSON 바이트다. 기본 설정(Jackson + default typing)으로
-        // 넣으면 byte[]가 base64 문자열로 한 번 더 감싸지고, 꺼낼 때 get(key, byte[].class)가
-        // 타입 검사에 걸려 터진다. **기본 비활성이라 테스트가 없어서 부하 측정에서야 드러났다** —
-        // 히트 경로만 실패하므로 진짜 에러가 27%로 찍혔다(미스는 멀쩡하다).
-        //
-        // raw()가 아니라 byteArray()다. raw()는 ByteBuffer를 돌려줘서
-        // "Cached value is not of required type [[B]: java.nio.HeapByteBuffer"로 같은 자리에서
-        // 또 터진다. 이름이 비슷한 세 개(raw/byteArray/byteBuffer) 중 byte[]를 그대로
-        // 주고받는 건 byteArray()뿐이다.
-        if (properties.seatmapResponseCacheEnabled()) {
-            perCache.put(CacheNames.SEATMAP_RESPONSE, base
-                    .entryTtl(properties.seatmapResponseTtl())
-                    .serializeValuesWith(RedisSerializationContext.SerializationPair.byteArray()));
-        }
+        CacheNames.TTLS.forEach((name, ttl) -> perCache.put(name, base.entryTtl(ttl)));
 
         return RedisCacheManager.builder(factory)
                 .cacheDefaults(base)
@@ -129,7 +81,7 @@ public class CacheConfig {
                 // 주어진 이름을 "현재 cacheDefaults로" 미리 만들기 때문에 위에서 준 캐시별 TTL을
                 // 덮어쓴다. 실제로 그렇게 짰다가 Redis에서 PTTL을 찍어보니 전부 -1(만료 없음)이었다 —
                 // 테스트로 TTL을 확인하지 않았으면 "TTL 60초"라고 문서에 적어두고 영구 캐시를
-                // 운영했을 것이다. 그래서 TtlTest가 PTTL을 직접 검증한다.
+                // 운영했을 것이다. 그래서 CacheTtlTest가 PTTL을 직접 검증한다.
                 .withInitialCacheConfigurations(perCache)
                 // 선언한 이름만 쓴다. 오타로 새 캐시가 조용히 생기면 적중률 0%로만 나타난다.
                 .disableCreateOnMissingCache()
@@ -152,7 +104,7 @@ public class CacheConfig {
      * 그 메서드는 JSON에 적힌 어떤 클래스든 역직렬화하므로, Redis에 쓰기 권한을 가진 쪽이
      * 임의 클래스를 올려 코드 실행으로 이어지는 고전적인 gadget 공격이 가능해진다. 캐시는
      * 세션과 같은 Redis를 쓰고 그 Redis는 compose 네트워크 안이지만, "지금 닫혀 있다"를 전제로
-     * 깔지 않는다. 허용 패키지를 우리 DTO로 한정한다.
+     * 깔지 않는다. 허용 패키지를 한정한다.
      */
     private RedisCacheConfiguration defaultCacheConfiguration() {
         BasicPolymorphicTypeValidator validator = BasicPolymorphicTypeValidator.builder()
@@ -180,17 +132,5 @@ public class CacheConfig {
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         StringRedisSerializer.UTF_8))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(serializer));
-    }
-
-    /**
-     * 기본 캐시 목록 + (켜져 있으면) 좌석맵 응답 바이트 캐시.
-     * 응답 바이트 캐시는 TTL이 프로퍼티로 오고 기본값 0은 비활성이라 여기서 조건부로 붙인다.
-     */
-    private Map<String, Duration> ttlsWithExperiment(CacheProperties properties) {
-        Map<String, Duration> ttls = new HashMap<>(CacheNames.TTLS);
-        if (properties.seatmapResponseCacheEnabled()) {
-            ttls.put(CacheNames.SEATMAP_RESPONSE, properties.seatmapResponseTtl());
-        }
-        return ttls;
     }
 }

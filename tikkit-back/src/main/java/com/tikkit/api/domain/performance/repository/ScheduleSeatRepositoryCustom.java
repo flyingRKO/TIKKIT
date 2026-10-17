@@ -1,7 +1,6 @@
 package com.tikkit.api.domain.performance.repository;
 
-import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
-import com.tikkit.api.domain.performance.entity.SeatStatus;
+import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 
 import java.util.List;
 import java.util.Map;
@@ -9,20 +8,14 @@ import java.util.Map;
 public interface ScheduleSeatRepositoryCustom {
 
     /**
-     * 회차 좌석의 <b>불변 부분</b>(좌표·구역·등급)을 배치도 순서(앞열 → 왼쪽)로 조회한다.
-     * 캐시에 들어가는 값이다 (Task 029).
+     * 회차의 모든 좌석을 배치도 순서(앞열 → 왼쪽)로 조회한다.
      * <p>
-     * 반환 순서가 그대로 응답 순서가 된다 — {@code orderBy}를 바꾸면 배치도가 뒤틀린다.
+     * Task 029에서 이걸 "불변 부분(좌표·등급)"과 "상태"로 쪼개 앞쪽만 캐시해 봤고,
+     * <b>측정 후 되돌렸다.</b> 캐시 항목이 2,000석에 337,885바이트라서 Redis에서 받아
+     * 역직렬화하는 비용이 이 쿼리보다 비쌌고, 그 비용은 좌석 수에 비례해 같이 커진다
+     * ({@code docs/improvements/008-caching.md} 4절).
      */
-    List<ScheduleSeatLayoutRow> findSeatLayoutByScheduleId(Long scheduleId);
-
-    /**
-     * 회차 좌석의 현재 상태. 키는 {@code schedule_seats.id}다 (Task 029).
-     * <p>
-     * 캐시하지 않는다 — 선점·확정·취소·만료가 매 순간 바꾼다. {@code seats} 조인도 정렬도 없이
-     * {@code schedule_seats}만 읽는다.
-     */
-    Map<Long, SeatStatus> findSeatStatusesByScheduleId(Long scheduleId);
+    List<ScheduleSeatResponse> findSeatResponsesByScheduleId(Long scheduleId);
 
     /**
      * 회차의 등급별 예매 가능 좌석 수. 좌석이 하나도 없는 등급은 키가 없다.
