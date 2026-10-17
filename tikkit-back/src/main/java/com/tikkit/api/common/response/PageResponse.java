@@ -27,12 +27,27 @@ public class PageResponse<T> {
     private final boolean last;
 
     public PageResponse(Page<T> page) {
-        this.content = page.getContent();
-        this.page = page.getNumber();
-        this.size = page.getSize();
-        this.totalElements = page.getTotalElements();
-        this.totalPages = page.getTotalPages();
-        this.first = page.isFirst();
-        this.last = page.isLast();
+        this(page.getContent(), page.getNumber(), page.getSize(), page.getTotalElements());
+    }
+
+    /**
+     * {@code Page} 없이 응답을 조립한다 (Task 029).
+     *
+     * <p>캐시에 {@code PageImpl}을 넣을 수 없어서(기본 생성자가 없고 {@code Pageable}을 품는다)
+     * 공연 목록 서비스가 {@code PerformanceListPage} record를 돌려주게 됐다. 그 경로에서 쓰는
+     * 생성자다. 파생값({@code totalPages}/{@code first}/{@code last})은 {@code PageImpl}이 하던
+     * 계산을 그대로 옮긴 것이다.
+     *
+     * <p>{@code size}가 0 이하로 올 수 없다 — 컨트롤러 기본값이 20이고
+     * {@code PageRequest.of}가 0 이하를 거부한다. 그래도 나눗셈이라 방어한다.
+     */
+    public PageResponse(List<T> content, int page, int size, long totalElements) {
+        this.content = content;
+        this.page = page;
+        this.size = size;
+        this.totalElements = totalElements;
+        this.totalPages = size <= 0 ? 1 : (int) Math.ceil((double) totalElements / (double) size);
+        this.first = page == 0;
+        this.last = page + 1 >= this.totalPages;
     }
 }

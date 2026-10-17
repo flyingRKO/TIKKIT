@@ -33,6 +33,18 @@ x-backend-env: &backend-env
   # 주의: 이 값을 바꿔 컨테이너를 재생성하면 backend IP가 바뀌어 nginx가 옛 IP를 물고
   # 502를 뱉는다. 반드시 `restart nginx`를 같이 한다 (nginx/nginx.conf 상단 주석).
   AUTH_SESSION_STORE: ${AUTH_SESSION_STORE:-redis}
+  # 조회 캐시 (Task 029). none | caffeine | redis
+  #
+  # 기본값을 none으로 둔다 — 캐시는 before/after를 비교해서 채택을 판정하는 대상이라,
+  # 스택을 띄우는 것만으로 켜지면 "캐시 없는 기준선"을 다시 재기 어렵다.
+  # 측정 군을 바꿀 때는 CACHE_TYPE=redis / caffeine / none으로 띄운다.
+  #
+  # caffeine으로 띄우면 BE 2대의 로컬 캐시가 갈린다 — 만료 배치가 ShedLock으로 한 대에서만
+  # 돌아서 evict가 반쪽만 적용된다. 그 불일치를 재는 것이 이 선택지의 목적이다.
+  CACHE_TYPE: ${CACHE_TYPE:-none}
+  # 좌석맵 "응답 바이트" 캐시 TTL. 0이면 비활성이고 그게 기본값이다.
+  # 직렬화 비용의 상한을 재기 위한 실험 스위치다 — 켜면 좌석 상태가 그만큼 stale해진다.
+  CACHE_SEATMAP_RESPONSE_TTL: ${CACHE_SEATMAP_RESPONSE_TTL:-0s}
 
 x-backend-healthcheck: &backend-healthcheck
   # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는
@@ -82,7 +94,30 @@ services:
     image: redis:7.4-alpine
     container_name: tikkit-redis-prod
     # 락·캐시·대기열은 날아가도 되는 데이터라 영속화를 끈다 (dev compose와 같은 판단).
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    #
+    # --- maxmemory (Task 029) ---
+    # 조회 캐시가 들어오면서 상한이 필요해졌다. seatLayout 항목이 좌석당 약 180바이트라
+    # 회차 하나가 2,000석이면 약 360KB이고, 부하 데이터의 회차 3,000개를 TTL 10분 안에 다
+    # 훑으면 **약 1GB**가 된다. 상한이 없으면 Redis가 호스트 메모리를 먹다가 OOM으로 죽고,
+    # 그러면 세션까지 같이 날아가 전 사용자가 로그아웃된다.
+    #
+    # 정책을 allkeys-lru로 둔 대가: **세션 키도 축출 대상이다.** 캐시가 상한을 채우면
+    # 로그인이 임의로 풀릴 수 있다. volatile-lru도 마찬가지인데(세션도 TTL이 있다) 캐시 전용
+    # Redis를 따로 띄우는 쪽은 더 큰 비용이 있다 — RedisConnectionFactory 빈이 두 개가 되면
+    # Spring Session 자동설정의 @ConditionalOnBean이 캐시 쪽 팩토리에도 걸려서,
+    # "캐시만 Redis로 켠다"가 세션까지 켜버린다 (Task 026이 만든 단일 토글 구조가 깨진다).
+    # 지금 규모에서는 noeviction(= 가득 차면 캐시 쓰기가 실패해 500이 난다)이 더 나쁘다.
+    # 분리는 docs/improvements/008-caching.md의 다음 단계로 넘긴다.
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "${REDIS_MAXMEMORY:-512mb}"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

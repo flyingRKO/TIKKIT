@@ -3,6 +3,7 @@ package com.tikkit.api.domain.performance.controller;
 import com.tikkit.api.common.response.ApiResponse;
 import com.tikkit.api.common.response.PageResponse;
 import com.tikkit.api.domain.performance.dto.PerformanceDetailResponse;
+import com.tikkit.api.domain.performance.dto.PerformanceListPage;
 import com.tikkit.api.domain.performance.dto.PerformanceSummaryResponse;
 import com.tikkit.api.domain.performance.service.PerformanceService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,7 +32,9 @@ public class PerformanceController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
-        return ApiResponse.success(new PageResponse<>(performanceService.list(category, keyword, status, page, size)));
+        PerformanceListPage result = performanceService.list(category, keyword, status, page, size);
+        return ApiResponse.success(
+                new PageResponse<>(result.content(), page, size, result.totalElements()));
     }
 
     @Operation(summary = "공연 상세 조회 (회차 목록 포함)")

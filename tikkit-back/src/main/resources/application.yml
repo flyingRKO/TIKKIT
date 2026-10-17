@@ -21,7 +21,7 @@ spring:
       # 항상 충족되어 **세션 저장소를 끌 방법이 없어진다**.
       # Boot 4에는 spring.session.store-type 같은 저장소 선택 프로퍼티도, 비활성화 스위치도 없다
       # (스타터를 넣는 것 자체가 선택이라는 설계다).
-      # 그래서 항상 제외하고, tikkit.auth.session-store=redis일 때만 SessionRedisConfig가
+      # 그래서 항상 제외하고, 세션·캐시 중 하나라도 redis일 때만 RedisConnectionConfig가
       # 팩토리를 직접 만든다 — Redisson이 스타터를 피한 것과 같은 패턴이다.
       - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
       # 위를 제외하면 이것도 같이 제외해야 한다. Spring Data Redis 리포지토리 지원이
@@ -95,6 +95,34 @@ tikkit:
   # 기본값이 dev 프론트엔드라 로컬 개발·테스트는 설정 없이 그대로 돌아간다.
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+  # 조회 캐시 (Task 029). none | caffeine | redis
+  #
+  # 기본값 none인 이유는 session-store와 같다 — Redis 없이도 기동·테스트가 돌아야 한다
+  # (docs/improvements/003-redis-distributed-lock.md 3절). none이면 NoOpCacheManager가 올라가서
+  # @Cacheable이 전부 통과만 하므로, 어노테이션을 지우지 않고도 캐시가 완전히 꺼진다.
+  #
+  # caffeine은 비교 실험군이다. 이 서비스에서 로컬 캐시는 구조적으로 맞지 않는다 —
+  # 공연 상태를 바꾸는 유일한 지점인 만료 배치가 ShedLock으로 한 인스턴스에서만 돌아서
+  # evict가 그 JVM에만 적용되고 다른 BE는 최대 60초간 옛 status를 내려준다.
+  # 그 불일치를 실측하려고 남겨둔 선택지이고 운영 후보는 redis다.
+  #
+  # 주의: 쿼리 카운트 테스트가 이 값에 묶여 있다. 캐시가 켜지면 히트 경로의 문장 수가 0이 되므로
+  # *QueryCountTest는 none/redis를 나눠 고정한다.
+  cache:
+    type: ${CACHE_TYPE:none}
+
+    # 좌석맵 "응답 바이트" 캐시의 TTL. 0이면 비활성이고 그게 기본값이다.
+    #
+    # 이건 실험용 스위치다. 서비스 레이어 캐시는 Jackson 직렬화를 건너뛰지 못하는데
+    # (캐시가 돌려주는 건 객체 리스트고 컨트롤러가 반환하면 다시 직렬화된다),
+    # 007이 "캐시 이득은 좌석맵 237.9KB의 직렬화 비용에서 나올 가능성이 크다"고 넘겼다.
+    # 그 가설을 재려면 직렬화된 바이트를 캐시해서 그대로 내려주는 수밖에 없다.
+    #
+    # 대가는 좌석 상태가 TTL만큼 stale해지는 것이다 — 오픈런에서 이미 HELD인 좌석을
+    # AVAILABLE로 보여주면 선점 요청이 409로 튕긴다. 측정 후 기각 근거로 쓸 목적이고
+    # 운영에서 켜지 않는다.
+    seatmap-response-ttl: ${CACHE_SEATMAP_RESPONSE_TTL:0s}
 
   # Redis (Task 020에서 도입). 기본값을 false로 둬서 Redis 없이도 기동·테스트가 된다.
   # 쓰려면 docker-compose로 redis를 띄우고 REDIS_ENABLED=true로 실행한다.
