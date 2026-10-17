@@ -373,6 +373,73 @@
           "legendFormat": "{{instance}} — {{status}}"
         }
       ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "캐시 적중률 (캐시별, Task 029)",
+      "description": "006이 남긴 요구를 닫는 패널 — 'p95가 좋아진 게 캐시 덕인가'는 지연만 봐서는 알 수 없고 적중률과 같이 봐야 한다. gradePrices/seatLayout은 불변 데이터라 금방 100%에 수렴하고, performanceList/performanceDetail은 만료 배치가 파생값을 바꿀 때 evict돼서 주기적으로 떨어진다(그 톱니가 보이면 evict가 동작하는 것이다). 시리즈가 아예 없으면 CACHE_TYPE=none이거나 enableStatistics()가 빠진 것이다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (cache) (rate(cache_gets_total{job=\"tikkit-backend\", result=\"hit\"}[1m])) / clamp_min(sum by (cache) (rate(cache_gets_total{job=\"tikkit-backend\"}[1m])), 0.001)",
+          "legendFormat": "{{cache}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "좌석맵 — 생성 시간 vs 전체 응답 p95 (Task 029)",
+      "description": "007이 '캐시 이득은 DB 시간이 아니라 237.9KB 직렬화 비용에서 나올 가능성이 크다'고 넘긴 가설을 보는 패널. 생성(DB 조회+조립)과 전체 응답의 간격이 직렬화와 서블릿·nginx 몫이고, 그건 서비스 레이어 캐시로 줄일 수 없는 부분이다. 간격이 크면 @Cacheable로 p95를 개선할 여지가 작다는 뜻이다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"tikkit-backend\", uri=\"/api/v1/schedules/{id}/seats\"}[1m])))",
+          "legendFormat": "전체 응답 p95"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tikkit_seatmap_build_seconds_bucket{job=\"tikkit-backend\"}[1m])))",
+          "legendFormat": "생성(DB+조립) p95"
+        }
+      ]
     }
   ]
 }

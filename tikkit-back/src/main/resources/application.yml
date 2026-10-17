@@ -21,7 +21,7 @@ spring:
       # 항상 충족되어 **세션 저장소를 끌 방법이 없어진다**.
       # Boot 4에는 spring.session.store-type 같은 저장소 선택 프로퍼티도, 비활성화 스위치도 없다
       # (스타터를 넣는 것 자체가 선택이라는 설계다).
-      # 그래서 항상 제외하고, tikkit.auth.session-store=redis일 때만 SessionRedisConfig가
+      # 그래서 항상 제외하고, 세션·캐시 중 하나라도 redis일 때만 RedisConnectionConfig가
       # 팩토리를 직접 만든다 — Redisson이 스타터를 피한 것과 같은 패턴이다.
       - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
       # 위를 제외하면 이것도 같이 제외해야 한다. Spring Data Redis 리포지토리 지원이
@@ -95,6 +95,22 @@ tikkit:
   # 기본값이 dev 프론트엔드라 로컬 개발·테스트는 설정 없이 그대로 돌아간다.
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+  # 조회 캐시 (Task 029). none | redis
+  #
+  # 기본값 none인 이유는 session-store와 같다 — Redis 없이도 기동·테스트가 돌아야 한다
+  # (docs/improvements/003-redis-distributed-lock.md 3절). none이면 NoOpCacheManager가 올라가서
+  # @Cacheable이 전부 통과만 하므로, 어노테이션을 지우지 않고도 캐시가 완전히 꺼진다.
+  # "캐시 없는 기준선"을 언제든 다시 잴 수 있게 하려는 뜻도 있다.
+  #
+  # 캐시 대상은 공연 목록·상세와 등급 가격뿐이다. 좌석맵은 캐싱을 기각했다 —
+  # 항목이 2,000석에 337,885바이트라서 Redis 왕복·역직렬화가 원래 쿼리보다 비쌌고,
+  # 적중률 99.97%에서도 캐시를 켠 쪽이 느렸다 (docs/improvements/008-caching.md 4절).
+  #
+  # 주의: 쿼리 카운트 테스트가 이 값에 묶여 있다. 캐시가 켜지면 히트 경로의 문장 수가 줄어서
+  # *QueryCountTest는 none/redis를 나눠 고정한다.
+  cache:
+    type: ${CACHE_TYPE:none}
 
   # Redis (Task 020에서 도입). 기본값을 false로 둬서 Redis 없이도 기동·테스트가 된다.
   # 쓰려면 docker-compose로 redis를 띄우고 REDIS_ENABLED=true로 실행한다.

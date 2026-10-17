@@ -27,6 +27,13 @@ public class ScheduleSeatRepositoryImpl implements ScheduleSeatRepositoryCustom 
      * {@code uk_schedule_seats_schedule_seat UNIQUE (schedule_id, seat_id)}의 선두 컬럼이
      * {@code schedule_id}라서 회차 범위는 그 인덱스로 좁혀진다. 인덱스를 일부러 안 둔 이유는
      * 선점·해제 UPDATE의 HOT 업데이트를 지키려는 것이다 (V4 주석, docs/ERD.md 2절).
+     * <p>
+     * Task 029에서 이걸 "좌표·등급"과 "상태" 두 쿼리로 쪼개 앞쪽만 캐시해 봤다. 응답 8필드 중
+     * 7개가 불변이라 캐시할 수 있는 모양이긴 했다. 그런데 캐시를 꺼 두면 왕복이 1 → 2로 늘어
+     * 좌석맵 p95가 6.63 → 8.62ms가 되고, Redis 캐시를 켜도 7.22ms로 원래보다 느렸다 —
+     * 캐시 항목이 337,885바이트라 받아서 2,000개 record로 역직렬화하는 비용이 이 쿼리를 넘는다.
+     * <b>적중률 99.97%에서도 그랬다.</b> 그래서 단일 쿼리로 되돌렸다
+     * ({@code docs/improvements/008-caching.md} 4절).
      */
     @Override
     public List<ScheduleSeatResponse> findSeatResponsesByScheduleId(Long scheduleId) {

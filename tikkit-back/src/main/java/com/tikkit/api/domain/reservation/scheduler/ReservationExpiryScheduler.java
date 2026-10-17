@@ -1,10 +1,13 @@
 package com.tikkit.api.domain.reservation.scheduler;
 
+import com.tikkit.api.common.config.CacheNames;
 import com.tikkit.api.domain.performance.repository.PerformanceRepository;
 import com.tikkit.api.domain.reservation.repository.ReservationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -22,6 +25,7 @@ public class ReservationExpiryScheduler {
 
     private final ReservationRepository reservationRepository;
     private final PerformanceRepository performanceRepository;
+    private final CacheManager cacheManager;
 
     @Scheduled(fixedDelay = 60_000)
     // BE가 2대 이상일 때 한 인스턴스만 실행하게 한다 (Task 026).
@@ -43,5 +47,43 @@ public class ReservationExpiryScheduler {
 
         int recalculatedPerformances = performanceRepository.recalculateDerivedFields(now);
         log.info("공연 판매 상태 재계산 배치 실행 — 값이 바뀐 공연 수: {}", recalculatedPerformances);
+
+        if (recalculatedPerformances > 0) {
+            evictPerformanceCaches();
+        }
+    }
+
+    /**
+     * 공연 파생값 캐시를 비운다 (Task 029).
+     *
+     * <h2>왜 여기가 유일한 evict 지점인가</h2>
+     * 이 서비스에는 공연 데이터를 바꾸는 쓰기 API가 없다 — 엔티티에 setter가 없고 관리자 API도
+     * 없다. 목록·상세 응답에 들어가는 값 중 변하는 건 {@code status}/{@code start_date}/{@code end_date}
+     * 뿐이고, 그걸 바꾸는 코드가 바로 위의 {@code recalculateDerivedFields} 하나다.
+     *
+     * <h2>왜 @CacheEvict가 아닌가</h2>
+     * 재계산 결과(변경 행 수)를 보고 조건부로 비워야 한다. {@code @CacheEvict}의
+     * {@code condition}은 메서드 <b>인자</b>만 볼 수 있고 {@code #result}는 쓸 수 없다
+     * ({@code beforeInvocation = false}여도 조건 평가는 인자 기준이다). 매번 전체를 비우면
+     * 대부분의 주기에서 멀쩡한 캐시를 날린다 — {@code IS DISTINCT FROM} 덕에 실제로 값이 바뀌는
+     * 주기는 드물다.
+     *
+     * <h2>로컬 캐시에서는 이게 반쪽짜리다</h2>
+     * 이 배치는 {@code @SchedulerLock}으로 <b>한 인스턴스에서만</b> 돈다. 그래서 캐시가 JVM 로컬
+     * ({@code tikkit.cache.type=caffeine})이면 evict도 그 인스턴스에만 적용되고, 다른 BE는 TTL
+     * 60초가 끝날 때까지 옛 {@code status}를 내려준다. Redis 공유 캐시면 한 번의 evict가 전체에
+     * 반영된다 — 두 저장소의 차이가 성능이 아니라 <b>정합성</b>에서 먼저 드러나는 지점이다.
+     *
+     * <p>{@code CacheManager}를 직접 쓰므로 {@code type=none}일 때도 안전하다 —
+     * {@code NoOpCacheManager}가 이름마다 빈 캐시를 돌려준다.
+     */
+    private void evictPerformanceCaches() {
+        for (String cacheName : CacheNames.PERFORMANCE_DERIVED) {
+            Cache cache = cacheManager.getCache(cacheName);
+            if (cache != null) {
+                cache.clear();
+            }
+        }
+        log.info("공연 파생값이 바뀌어 캐시를 비웠다 — {}", CacheNames.PERFORMANCE_DERIVED);
     }
 }

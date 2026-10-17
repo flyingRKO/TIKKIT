@@ -9,6 +9,11 @@ public interface ScheduleSeatRepositoryCustom {
 
     /**
      * 회차의 모든 좌석을 배치도 순서(앞열 → 왼쪽)로 조회한다.
+     * <p>
+     * Task 029에서 이걸 "불변 부분(좌표·등급)"과 "상태"로 쪼개 앞쪽만 캐시해 봤고,
+     * <b>측정 후 되돌렸다.</b> 캐시 항목이 2,000석에 337,885바이트라서 Redis에서 받아
+     * 역직렬화하는 비용이 이 쿼리보다 비쌌고, 그 비용은 좌석 수에 비례해 같이 커진다
+     * ({@code docs/improvements/008-caching.md} 4절).
      */
     List<ScheduleSeatResponse> findSeatResponsesByScheduleId(Long scheduleId);
 

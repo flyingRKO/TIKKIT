@@ -232,6 +232,38 @@ Hibernate `Statistics`로 문장 수를 직접 셉니다.
 
 측정 상세와 기각 근거는 [007. 쿼리·인덱스 최적화](docs/improvements/007-query-optimization.md)에 있습니다.
 
+#### 조회 캐싱 (Task 029)
+
+```bash
+# 캐시를 켜고 띄웁니다 (기본값은 none — "캐시 없는 기준선"을 언제든 다시 재려고 끄고 둡니다)
+CACHE_TYPE=redis docker compose -f docker-compose.prod.yml up -d backend1 backend2
+docker compose -f docker-compose.prod.yml restart nginx   # 안 하면 nginx가 옛 IP로 502
+
+# 적중률과 TTL 확인
+curl -s localhost:8080/actuator/prometheus | grep cache_gets
+docker exec tikkit-redis-prod redis-cli pttl 'tikkit:cache:performanceDetail::1'
+```
+
+캐시 대상은 **공연 목록·상세와 등급 가격**뿐입니다. 좌석 상태와 잔여 수량은 예매마다 바뀌어서
+제외하고, **좌석맵은 캐싱 자체를 기각했습니다.**
+
+기각 이유가 이 Task의 핵심입니다. 좌석 좌표는 불변이라 캐시할 수 있는 모양이어서 "불변 부분만
+캐시 + 상태는 실시간" 구조를 만들어 실측했는데, **적중률 99.97%인데도 캐시 없는 원본보다
+느렸습니다**(6.63 → 7.22ms). 캐시 항목이 2,000석에 337,885바이트라서 히트 경로가 하는 일이
+"DB 안 가기"가 아니라 **"330KB를 받아 2,000개 record로 역직렬화하기"**였고, 그게 Postgres에서
+2,000행 읽는 것보다 비쌌습니다. 전송량과 역직렬화 비용이 둘 다 좌석 수에 선형이라 공연장이
+커지면 격차가 벌어집니다 — **지금 느린 게 아니라 방향이 반대인 캐시**입니다.
+
+남긴 캐시는 **현 규모에서 p95를 개선하지 않습니다**(탐색 2.20 → 2.27ms). 측정 구간이 BE CPU
+4.2%의 저부하라 DB 작업을 줄인 효과가 원래 지연에 드러나지 않습니다. 채택 근거는 지연이 아니라
+**용량**(히트가 DB 왕복을 없앱니다)이고, 항목이 작아서 카탈로그가 커질수록 유리해지는 쪽입니다.
+검증은 Task 033 포화 테스트가 합니다.
+
+쿼리 카운트로 히트가 실제로 DB를 안 가는지 고정했습니다 — 공연 상세가 미스 2문장 / 히트
+**0문장**, 등급 조회가 미스 2 / 히트 **1문장**(잔여 수량 COUNT는 매번 셉니다).
+
+측정 상세와 기각 근거는 [008. 캐싱 적용](docs/improvements/008-caching.md)에 있습니다.
+
 ## 포트폴리오 포인트 (예정)
 
 MVP 완성 이후 아래 항목을 순서대로 진행하며, 각 단계는 `docs/improvements/`에 **문제 → 재현 → 원인 분석 → 해결 → before/after 수치**로 기록할 예정입니다.

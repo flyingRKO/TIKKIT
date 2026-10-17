@@ -21,7 +21,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * 정리 커밋에서 건드린 운영 코드가 이 파일의 case 두 줄과 {@code SecurityConfig}의 if 블록
  * 하나뿐이었다. 나머지는 파일 삭제로 끝났다.
  *
- * <p>Redis 연결 설정은 {@code SessionRedisConfig}가 따로 맡는다 — 전략이 켜질 때만
+ * <p>Redis 연결 설정은 {@code com.tikkit.api.common.config.RedisConnectionConfig}가 따로 맡는다 — 전략이 켜질 때만
  * 연결 팩토리를 만들어야 해서 조건부 설정 클래스가 필요하다.
  */
 @Configuration

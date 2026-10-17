@@ -33,6 +33,15 @@ x-backend-env: &backend-env
   # 주의: 이 값을 바꿔 컨테이너를 재생성하면 backend IP가 바뀌어 nginx가 옛 IP를 물고
   # 502를 뱉는다. 반드시 `restart nginx`를 같이 한다 (nginx/nginx.conf 상단 주석).
   AUTH_SESSION_STORE: ${AUTH_SESSION_STORE:-redis}
+  # 조회 캐시 (Task 029). none | redis
+  #
+  # 기본값을 none으로 둔다 — 캐시는 before/after를 비교해서 채택을 판정하는 대상이라,
+  # 스택을 띄우는 것만으로 켜지면 "캐시 없는 기준선"을 다시 재기 어렵다.
+  # 캐시를 켜고 재려면 CACHE_TYPE=redis로 띄운 뒤 nginx를 재시작한다.
+  #
+  # 캐시 대상은 공연 목록·상세와 등급 가격뿐이다. 좌석맵은 캐싱을 기각했다 —
+  # 적중률 99.97%에서도 캐시를 켠 쪽이 느렸다 (docs/improvements/008-caching.md 4절).
+  CACHE_TYPE: ${CACHE_TYPE:-none}
 
 x-backend-healthcheck: &backend-healthcheck
   # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는
@@ -82,7 +91,32 @@ services:
     image: redis:7.4-alpine
     container_name: tikkit-redis-prod
     # 락·캐시·대기열은 날아가도 되는 데이터라 영속화를 끈다 (dev compose와 같은 판단).
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    #
+    # --- maxmemory (Task 029) ---
+    # OOM 가드다. 상한이 없으면 Redis가 호스트 메모리를 먹다가 죽고, 그러면 세션까지 같이
+    # 날아가 전 사용자가 로그아웃된다(005 9절의 "단일 Redis" 한계가 그대로 커진다).
+    #
+    # 조회 캐시 자체는 작다 — 공연 목록 항목이 690바이트, 상세·등급 가격도 수 KB다.
+    # 카탈로그 전체가 올라와도 수십 MB라서 512MB를 채울 일이 없다(측정 중 피크 43.3MB,
+    # 축출 0건). 좌석 배치 캐시를 넣었을 때는 회차당 384KB로 3,000회차면 1.15GB였는데,
+    # 그 캐시는 기각했다 (docs/improvements/008-caching.md 4절).
+    #
+    # 그래서 allkeys-lru의 대가(**세션 키도 축출 대상이다**)는 지금 구조에서는 발동하지
+    # 않는다. 다만 Task 031 대기열이 들어오면 ZSET이 커지므로 그때 다시 본다 — 그 시점에
+    # 캐시·대기열용 Redis를 세션과 분리할지 판단한다. 분리가 공짜가 아닌 이유는
+    # RedisConnectionFactory 빈이 두 개가 되면 Spring Session 자동설정의 @ConditionalOnBean이
+    # 캐시 쪽 팩토리에도 걸려서 "캐시만 켠다"가 세션까지 켜버리기 때문이다
+    # (Task 026이 만든 단일 토글 구조가 깨진다).
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "${REDIS_MAXMEMORY:-512mb}"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

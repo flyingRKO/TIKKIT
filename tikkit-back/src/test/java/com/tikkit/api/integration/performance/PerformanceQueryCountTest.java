@@ -23,6 +23,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code AbstractConcurrencyTest}를 베이스로 쓰는 이유는 동시성과 무관하다. 쿼리 수는
  * <b>트랜잭션 밖에서</b> 세야 하고(= 호출마다 세션이 새로 열려야 한다), 그 조건을 갖춘
  * 비트랜잭션 + truncate 베이스가 이것뿐이다 ({@link QueryCounter} Javadoc 참조).
+ *
+ * <p><b>여기 적힌 숫자는 캐시가 꺼진 상태({@code tikkit.cache.type=none}, test 프로필 기본값)의
+ * 값이다</b> (Task 029). 캐시를 켜면 두 번째 호출부터 문장 수가 줄어드는데, 그쪽은
+ * {@code CacheQueryCountTest}가 Redis 컨테이너를 띄워 미스 경로와 히트 경로를 따로 고정한다.
+ * 두 테스트를 나눈 이유는 프로퍼티가 달라 스프링 컨텍스트가 어차피 분리되기 때문이다.
  */
 class PerformanceQueryCountTest extends AbstractConcurrencyTest {
 
@@ -75,12 +80,14 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
     }
 
     @Test
-    @DisplayName("등급 조회는 회차 존재 확인·등급 행·잔여 좌석 COUNT 3문장을 보낸다")
-    void 등급_조회_3문장() {
+    @DisplayName("등급 조회는 등급 행·잔여 좌석 COUNT 2문장을 보낸다 — 존재 확인이 빠졌다 (Task 029)")
+    void 등급_조회_2문장() {
         long queries = queryCounter.count(() -> scheduleService.getTicketGrades(scheduleId));
 
-        // existsById 1문장이 섞여 있다. 없애면 "없는 회차"와 "등급이 없는 회차"를 404로 가를 수 없다.
-        assertThat(queries).isEqualTo(3);
+        // Task 028까지는 3문장이었다(existsById + 등급 + COUNT). Task 029에서 등급을 먼저 조회하고
+        // 결과가 비었을 때만 existsById로 404를 가르도록 뒤집어서, 정상 경로의 왕복이 하나 줄었다.
+        // "없는 회차"와 "등급이 없는 회차"를 여전히 구분한다 — 확인 시점만 옮겼다.
+        assertThat(queries).isEqualTo(2);
     }
 
     @Test
@@ -89,6 +96,10 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
         long queries = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
 
         // 좌석이 10석이든 2,000석이든 문장 수는 같아야 한다 — 늘어나면 좌석마다 seat를 당겨 쓴 것이다.
+        //
+        // Task 029에서 이걸 (배치 + 상태) 두 쿼리로 쪼개 배치만 캐시해 히트 시 1문장으로 줄여
+        // 봤지만 되돌렸다. 캐시 항목이 2,000석에 337,885바이트라 Redis 왕복·역직렬화가 쿼리보다
+        // 비쌌다 — **문장 수가 줄어도 더 느릴 수 있다**(008 4절). 그래서 이 숫자는 Task 028과 같다.
         assertThat(queries).isEqualTo(2);
         assertThat(scheduleService.getSeats(scheduleId)).hasSize(10);
     }
