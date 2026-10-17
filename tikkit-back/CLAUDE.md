@@ -15,7 +15,6 @@
 | Redis | 7 | 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031 예정) |
 | Redisson | 4.8.0 | Redis 클라이언트 (대기열용. 세션·캐시는 Lettuce를 쓴다) |
 | Spring Cache | - | 조회 캐시 추상화 (Task 029). 저장소는 `tikkit.cache.type`으로 고른다 |
-| Caffeine | - | 로컬 캐시 (Task 029 비교 실험군) |
 | Actuator + Micrometer | - | 헬스·지표 노출 (`/actuator/health`, `/actuator/prometheus`, Task 025) |
 | Lombok | - | 보일러플레이트 코드 감소 |
 | JUnit 5 | - | 테스트 프레임워크 |
@@ -159,25 +158,36 @@ Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, 
 
 ## 조회 캐시 (Task 029)
 
-저장소는 `tikkit.cache.type`으로 고른다 — `none`(기본) | `caffeine` | `redis`.
+저장소는 `tikkit.cache.type`으로 고른다 — `none`(기본) | `redis`.
 기본값이 `none`인 이유는 `session-store`와 같다: Redis 없이도 기동·테스트가 돌아야 한다
 (`docs/improvements/003-redis-distributed-lock.md` 3절). `none`은 `NoOpCacheManager`라
-`@Cacheable`이 전부 통과만 하므로, 어노테이션을 지우지 않고도 캐시가 완전히 꺼진다.
+`@Cacheable`이 전부 통과만 하므로, 어노테이션을 지우지 않고도 캐시가 완전히 꺼진다 —
+"캐시 없는 기준선"을 언제든 다시 잴 수 있다.
 
 캐시 이름·TTL·evict 대상은 **`common/config/CacheNames.java` 한 곳**에 모여 있다.
 저장소 선택은 `CacheConfig` 한 곳이고, 서비스 코드는 저장소를 모른다.
 
-**캐시하는 것은 "변하지 않는 것"뿐이다.**
+**캐시하는 것은 "변하지 않고 작은 것"뿐이다.**
 
-| 캐시 | 값 | TTL |
-|---|---|---|
-| `performanceList` / `performanceDetail` | 공연 목록·상세 | 60s (배치 주기와 같다) |
-| `gradePrices` | 등급·가격 (잔여 수량 제외) | 10m |
-| `seatLayout` | 좌석 좌표·등급 (status 제외) | 10m |
+| 캐시 | 값 | 항목 크기 | TTL |
+|---|---|---|---|
+| `performanceList` / `performanceDetail` | 공연 목록·상세 | 수백 B ~ 수 KB | 60s (배치 주기와 같다) |
+| `gradePrices` | 등급·가격 (잔여 수량 제외) | 수백 B | 10m |
 
 **캐시하지 않는 것**: 좌석 상태(`status`), 잔여 수량(`remainingQuantity`), keyword 검색 결과,
-없는 회차의 빈 결과. 좌석맵과 등급 조회는 캐시된 불변 부분과 실시간 조회를 `ScheduleService`가
-합쳐서 내려준다 — 그래서 선점 직후 재조회에 `HELD`가 즉시 보인다.
+없는 회차의 빈 결과, 그리고 **좌석맵 전체**. 등급 조회는 캐시된 가격과 실시간 COUNT를
+`ScheduleService`가 합쳐서 내려준다 — 그래서 매진이 TTL만큼 늦게 보이는 일이 없다.
+
+**좌석맵은 캐싱을 기각했다.** 좌표·등급은 불변이라 캐시할 수 있는 모양이었지만, 항목이
+2,000석에 337,885바이트여서 Redis 왕복·역직렬화가 원래 쿼리보다 비쌌다 — **적중률 99.97%에서도
+캐시를 켠 쪽이 느렸다**(좌석맵 p95 6.63 → 7.22ms). 게다가 그 비용은 좌석 수에 비례해 커지므로
+규모가 커질수록 나빠진다. 좌석맵의 확장성 해법은 캐싱이 아니라 응답 크기를 줄이는 것이고
+그건 Task 030이 맡는다. 그래서 **새 캐시를 넣을 때는 항목 크기를 같이 본다** — 값이 커지면
+캐시가 아끼는 DB 시간보다 네트워크·역직렬화 비용이 먼저 커진다.
+
+**현 규모에서는 켜도 p95가 좋아지지 않는다.** 006 기준으로 BE CPU가 최대 4.2%인 저부하라
+요청당 고정비가 지연을 지배한다. 채택 근거는 지연이 아니라 **용량**(히트가 DB 왕복을 없앤다)이고,
+카탈로그가 커질수록 유리해지는 쪽이다. 그 검증은 Task 033 포화 테스트가 한다.
 
 새 캐시를 추가할 때 주의할 점 넷. 전부 **조용히 틀리는** 것들이라 실제로 한 번씩 겪었다
 (`docs/improvements/008-caching.md` 6절).
@@ -196,10 +206,11 @@ Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, 
 `PerformanceQueryCountTest`, Redis 캐시의 미스/히트 경로는 `CacheQueryCountTest`가 따로 고정한다.
 캐시 대상을 바꾸면 양쪽을 같이 고쳐야 한다.
 
-**Redis는 세션과 캐시가 공유한다.** `maxmemory` + `allkeys-lru`를 걸어서 캐시가 상한을 채우면
-세션 키도 축출될 수 있다. 캐시 전용 인스턴스로 분리하지 않은 이유는 008 8절에 있다 —
-`RedisConnectionFactory` 빈이 둘이 되면 Spring Session 자동설정이 캐시 팩토리에도 걸려서
-"캐시만 켠다"가 세션까지 켠다.
+**Redis는 세션과 캐시가 공유한다.** `maxmemory` + `allkeys-lru`는 OOM 가드이고, 조회 캐시는
+카탈로그 전체가 올라와도 수십 MB라서 상한을 채우지 않는다(측정 중 피크 43.3MB, 축출 0건).
+축출이 일어나면 세션 키도 대상이므로, Task 031 대기열로 메모리가 커지면 세션과 분리할지 다시
+판단한다. 분리가 공짜가 아닌 이유는 008 8절에 있다 — `RedisConnectionFactory` 빈이 둘이 되면
+Spring Session 자동설정이 캐시 팩토리에도 걸려서 "캐시만 켠다"가 세션까지 켠다.
 
 ## 모니터링 (Task 025)
 
