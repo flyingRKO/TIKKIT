@@ -103,6 +103,23 @@ public class CacheConfig {
         Map<String, RedisCacheConfiguration> perCache = new HashMap<>();
         ttlsWithExperiment(properties).forEach((name, ttl) -> perCache.put(name, base.entryTtl(ttl)));
 
+        // 좌석맵 응답 바이트 캐시만 값 직렬화를 통과(raw)로 바꾼다.
+        //
+        // 이 캐시의 값은 이미 직렬화된 JSON 바이트다. 기본 설정(Jackson + default typing)으로
+        // 넣으면 byte[]가 base64 문자열로 한 번 더 감싸지고, 꺼낼 때 get(key, byte[].class)가
+        // 타입 검사에 걸려 터진다. **기본 비활성이라 테스트가 없어서 부하 측정에서야 드러났다** —
+        // 히트 경로만 실패하므로 진짜 에러가 27%로 찍혔다(미스는 멀쩡하다).
+        //
+        // raw()가 아니라 byteArray()다. raw()는 ByteBuffer를 돌려줘서
+        // "Cached value is not of required type [[B]: java.nio.HeapByteBuffer"로 같은 자리에서
+        // 또 터진다. 이름이 비슷한 세 개(raw/byteArray/byteBuffer) 중 byte[]를 그대로
+        // 주고받는 건 byteArray()뿐이다.
+        if (properties.seatmapResponseCacheEnabled()) {
+            perCache.put(CacheNames.SEATMAP_RESPONSE, base
+                    .entryTtl(properties.seatmapResponseTtl())
+                    .serializeValuesWith(RedisSerializationContext.SerializationPair.byteArray()));
+        }
+
         return RedisCacheManager.builder(factory)
                 .cacheDefaults(base)
                 // withInitialCacheConfigurations만으로 이름별 설정이 적용되고, 그 이름들이

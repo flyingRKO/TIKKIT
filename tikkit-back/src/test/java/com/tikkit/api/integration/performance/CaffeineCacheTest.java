@@ -37,7 +37,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 2대 간 불일치는 compose로 BE 2대를 띄워 측정한다
  * ({@code docs/improvements/008-caching.md}). Task 026이 세션 불일치를 다룬 방식과 같다.
  */
-@TestPropertySource(properties = "tikkit.cache.type=caffeine")
+@TestPropertySource(properties = {
+        "tikkit.cache.type=caffeine",
+        // 커넥션 고갈을 막는다 — 이유는 AbstractRedisCacheContainerTest의 같은 설정 주석 참조.
+        "spring.datasource.hikari.maximum-pool-size=5",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class CaffeineCacheTest extends AbstractConcurrencyTest {
 
     @Autowired

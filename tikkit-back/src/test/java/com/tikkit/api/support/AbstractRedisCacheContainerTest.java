@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
 
@@ -29,6 +30,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 캐시 히트는 "두 번째 호출에서 쿼리가 안 나간다"로 검증하는데, 트랜잭션 테스트 안에서는
  * 세션이 유지돼 1차 캐시와 구분되지 않는다 ({@link QueryCounter} Javadoc의 같은 이유).
  */
+@TestPropertySource(properties = {
+        // AbstractConcurrencyTest가 풀을 30으로 올려 둔 것을 되돌린다. 거기서는 100명이 동시에
+        // 좌석을 집는 재현에 필요한 값이지만, 캐시 테스트는 단일 스레드다.
+        //
+        // 줄이지 않으면 **Postgres 커넥션이 고갈된다.** 스프링 테스트 컨텍스트는 캐시되고
+        // 실행이 끝날 때까지 닫히지 않으므로 풀이 컨텍스트마다 쌓인다. 캐시 토글 조합마다
+        // 컨텍스트가 하나씩 생기는데(redis / caffeine / redis+응답바이트) 각각 30이면
+        // 기본 max_connections(100)를 넘고, 증상은 캐시와 무관한 테스트에서
+        // "FATAL: sorry, too many clients already"로 나타난다.
+        "spring.datasource.hikari.maximum-pool-size=5",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 public abstract class AbstractRedisCacheContainerTest extends AbstractConcurrencyTest {
 
     private static final int REDIS_PORT = 6379;
