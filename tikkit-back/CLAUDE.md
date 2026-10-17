@@ -12,8 +12,10 @@
 | Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
 | Spring Web | - | REST API (`spring-boot-starter-webmvc`) |
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
-| Redis | 7 | 캐시·대기열 (Task 020 도입, `REDIS_ENABLED=true`일 때만 연결) |
-| Redisson | 4.8.0 | Redis 클라이언트 |
+| Redis | 7 | 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031 예정) |
+| Redisson | 4.8.0 | Redis 클라이언트 (대기열용. 세션·캐시는 Lettuce를 쓴다) |
+| Spring Cache | - | 조회 캐시 추상화 (Task 029). 저장소는 `tikkit.cache.type`으로 고른다 |
+| Caffeine | - | 로컬 캐시 (Task 029 비교 실험군) |
 | Actuator + Micrometer | - | 헬스·지표 노출 (`/actuator/health`, `/actuator/prometheus`, Task 025) |
 | Lombok | - | 보일러플레이트 코드 감소 |
 | JUnit 5 | - | 테스트 프레임워크 |
@@ -142,7 +144,62 @@ docker-compose up -d
 
 DB 자격증명은 `application-dev.yml`에서 `${DB_USERNAME:tikkit_user}` 형태의 기본값을 쓴다. 평소엔 아무 설정 없이 `.env`의 값과 동일하게 동작하고, 필요할 때만(CI 등) `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` 환경변수로 재정의한다.
 
-Redis는 `tikkit.redis.enabled`가 기본 `false`라 애플리케이션이 연결하지 않는다. Redis 없이도 기동과 테스트가 돌아야 하기 때문이다 — 이유는 `docs/improvements/003-redis-distributed-lock.md` 3절. 쓰려면 `REDIS_ENABLED=true`로 실행한다. 캐시(Task 029)·대기열(Task 031)에서 본격적으로 쓴다.
+Redis에 연결하는 토글이 **세 개**인데 서로 독립이다. 전부 기본값이 "연결하지 않음"이고, 이유는
+Redis 없이도 기동과 테스트가 돌아야 하기 때문이다(`docs/improvements/003-redis-distributed-lock.md` 3절).
+
+| 프로퍼티 | 용도 | 기본값 |
+|---|---|---|
+| `tikkit.auth.session-store=redis` | Spring Session (Task 026) | `memory` |
+| `tikkit.cache.type=redis` | 조회 캐시 (Task 029) | `none` |
+| `tikkit.redis.enabled=true` | Redisson 클라이언트 (대기열, Task 031 예정) | `false` |
+
+주소는 `tikkit.redis.address` 하나를 공유한다("Redis가 어디 있나"는 하나의 사실이다).
+Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, **세션과 캐시 중 하나라도
+`redis`면** 생성된다(`AnyNestedCondition`으로 OR). 둘을 각각 켤 수 있어야 해서 AND가 아니다.
+
+## 조회 캐시 (Task 029)
+
+저장소는 `tikkit.cache.type`으로 고른다 — `none`(기본) | `caffeine` | `redis`.
+기본값이 `none`인 이유는 `session-store`와 같다: Redis 없이도 기동·테스트가 돌아야 한다
+(`docs/improvements/003-redis-distributed-lock.md` 3절). `none`은 `NoOpCacheManager`라
+`@Cacheable`이 전부 통과만 하므로, 어노테이션을 지우지 않고도 캐시가 완전히 꺼진다.
+
+캐시 이름·TTL·evict 대상은 **`common/config/CacheNames.java` 한 곳**에 모여 있다.
+저장소 선택은 `CacheConfig` 한 곳이고, 서비스 코드는 저장소를 모른다.
+
+**캐시하는 것은 "변하지 않는 것"뿐이다.**
+
+| 캐시 | 값 | TTL |
+|---|---|---|
+| `performanceList` / `performanceDetail` | 공연 목록·상세 | 60s (배치 주기와 같다) |
+| `gradePrices` | 등급·가격 (잔여 수량 제외) | 10m |
+| `seatLayout` | 좌석 좌표·등급 (status 제외) | 10m |
+
+**캐시하지 않는 것**: 좌석 상태(`status`), 잔여 수량(`remainingQuantity`), keyword 검색 결과,
+없는 회차의 빈 결과. 좌석맵과 등급 조회는 캐시된 불변 부분과 실시간 조회를 `ScheduleService`가
+합쳐서 내려준다 — 그래서 선점 직후 재조회에 `HELD`가 즉시 보인다.
+
+새 캐시를 추가할 때 주의할 점 넷. 전부 **조용히 틀리는** 것들이라 실제로 한 번씩 겪었다
+(`docs/improvements/008-caching.md` 6절).
+
+- **`RedisCacheManager.builder()`에서 `withInitialCacheConfigurations` 뒤에 `initialCacheNames`를
+  부르면 캐시별 TTL이 `cacheDefaults`로 덮인다.** `PTTL`이 전부 `-1`이 되는데 설정 코드만
+  읽으면 멀쩡해 보인다. `CacheTtlTest`가 Redis 키의 남은 수명을 직접 읽어 고정한다.
+- **같은 클래스 안에서 `@Cacheable` 메서드를 호출하면 프록시를 타지 않는다.** 예외도 경고도
+  없고 적중률만 0%다. 캐시 대상과 그걸 쓰는 조립 로직이 한 메서드에 있어야 한다면
+  `CatalogCache`처럼 빈을 분리한다.
+- **캐시 키에 SpEL의 `null` 문자열화를 기대면 안 된다.** `(#category ?: '-')`처럼 명시한다.
+- **키가 경로 변수면 사용자가 키 공간을 고를 수 있다.** 빈 결과를 캐시하면 무작위 id로
+  캐시를 채울 수 있으므로 `unless = "#result.isEmpty()"`를 붙인다.
+
+**쿼리 카운트 테스트가 `cache.type`에 묶여 있다.** 캐시 off 기준값은
+`PerformanceQueryCountTest`, Redis 캐시의 미스/히트 경로는 `CacheQueryCountTest`가 따로 고정한다.
+캐시 대상을 바꾸면 양쪽을 같이 고쳐야 한다.
+
+**Redis는 세션과 캐시가 공유한다.** `maxmemory` + `allkeys-lru`를 걸어서 캐시가 상한을 채우면
+세션 키도 축출될 수 있다. 캐시 전용 인스턴스로 분리하지 않은 이유는 008 8절에 있다 —
+`RedisConnectionFactory` 빈이 둘이 되면 Spring Session 자동설정이 캐시 팩토리에도 걸려서
+"캐시만 켠다"가 세션까지 켠다.
 
 ## 모니터링 (Task 025)
 
