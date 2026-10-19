@@ -1,7 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "pretendard/dist/web/variable/pretendardvariable.css";
+/* 전체 폰트(woff2 1개 2,009KB) 대신 unicode-range로 쪼갠 서브셋을 쓴다. 전체 CSS는
+   브라우저가 쓰지도 않는 한자·일문까지 통째로 받게 해서 Task 030 측정에서 전송량의
+   88%를 차지했다(009 4.1절). 같은 패키지의 dynamic-subset은 @font-face 92개로 나뉘어
+   있어 실제로 쓰는 글자 범위만 내려온다. font-family 이름이 양쪽 같아서
+   --font-sans는 건드릴 필요가 없다. */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 
 @custom-variant dark (&:is(.dark *));
 
