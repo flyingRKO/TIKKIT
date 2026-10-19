@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test --project=e2e",
-    "screenshots": "playwright test --project=screenshots"
+    "screenshots": "playwright test --project=screenshots",
+    "perf": "playwright test --project=perf"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -32,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
+    "lighthouse": "13.5.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -57,7 +57,13 @@ WHERE rs.schedule_seat_id = ss.id
 -- PENDING에만 걸리는 부분 인덱스라 CANCELLED가 되는 순간 풀린다.
 --
 -- 예약 행이 실행마다 쌓이는 건 받아들인다. 부하 테스트 데이터고, 완전 삭제는
--- 99-teardown.sql이 한다(그쪽은 schedule_seats를 먼저 지워서 이 문제를 피한다).
+-- 99-teardown.sql이 한다.
+--
+-- 정정(Task 030): 여기 원래 "99-teardown은 schedule_seats를 먼저 지워서 이 문제를 피한다"고
+-- 적혀 있었는데 **틀렸다.** 트랜잭션 안의 DELETE는 테이블을 작게 만들지 않는다 — 지운 행도
+-- dead tuple로 힙에 남아서 뒤따르는 FK 풀스캔은 여전히 600만 행을 다 읽는다. 실제로
+-- 99-teardown이 600만 행에서 41분을 돌고도 끝나지 않았다. 지금은 99-teardown이 삭제용
+-- 임시 인덱스를 직접 만들고 커밋 전에 지우는 식으로 해결했다(그 파일 [0/3] 참조).
 UPDATE reservations
 SET status       = 'CANCELLED',
     cancelled_at = now(),
