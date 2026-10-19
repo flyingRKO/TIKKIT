@@ -16,6 +16,9 @@
 /playwright-report/
 /blob-report/
 
+# 성능 측정 원본 (Task 030_1) — 회차당 약 1MB라 커밋하지 않는다. 수치는 문서로 옮긴다
+/.lighthouse/
+
 # next.js
 /.next/
 /out/
