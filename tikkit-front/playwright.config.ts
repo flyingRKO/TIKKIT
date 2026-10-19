@@ -18,15 +18,26 @@ export default defineConfig({
   },
   projects: [
     {
-      // 회귀 테스트용. 스크린샷 캡처 스펙은 제외한다
+      // 회귀 테스트용. 스크린샷 캡처와 성능 측정 스펙은 제외한다
       name: "e2e",
-      testIgnore: "**/screenshots.spec.ts",
+      testIgnore: ["**/screenshots.spec.ts", "**/perf/**"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       // README용 화면 캡처. CI에서는 돌리지 않고 로컬에서 `npm run screenshots`로 실행한다
       name: "screenshots",
       testMatch: "**/screenshots.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // 성능 측정 (Task 030). 회귀 테스트가 아니라 수치를 뽑는 용도라 CI에서는 돌리지 않고
+      // 로컬에서 `npm run perf`로 실행한다.
+      //
+      // prod 스택(docker-compose.prod.yml, nginx 경유)을 대상으로 해야 의미가 있어서
+      // E2E_BASE_URL을 반드시 넘겨야 한다. 기본값 localhost:3000으로 조용히 떨어지면
+      // dev 서버나 옛 번들을 재게 되므로(004 10절 "함정 4") 스펙이 직접 검사해서 실패시킨다.
+      name: "perf",
+      testMatch: "**/perf/**/*.spec.ts",
       use: { ...devices["Desktop Chrome"] },
     },
   ],
