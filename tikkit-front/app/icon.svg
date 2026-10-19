@@ -1,0 +1,7 @@
+<!-- 색은 globals.css의 --primary oklch(0.52 0.24 295)를 sRGB로 변환한 값이다.
+     SVG는 CSS 변수를 못 읽어서 리터럴로 박는다. 라이트/다크 양쪽에서 쓰이므로
+     배경을 깔아 어느 테마에서도 대비가 유지되게 했다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#7933E0"/>
+  <path fill="#fff" d="M7 11h18v3a2 2 0 0 0 0 4v3H7v-3a2 2 0 0 0 0-4z"/>
+</svg>
