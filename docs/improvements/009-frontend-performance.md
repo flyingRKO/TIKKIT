@@ -430,11 +430,12 @@ seat_id)`의 두 번째다. **"인덱스 있으니 괜찮다"는 착각이 여�
 (2) 때문에 **그 문장이 틀렸다.** 검증 없이 적힌 안심 문장 한 줄이 주석이 아예 없는 것보다
 비쌌다. 해당 주석을 정정했다.
 
-인덱스 7개를 만들고 다시 돌리니 **0.471초**에 끝났다. 인덱스 생성 자체는 600만 행에서 0.37~1.6초다.
+인덱스 7개를 만들고 다시 돌리니 600만 행이 **58.2초**에 끝났다. 인덱스 생성 자체는 600만 행에서 0.37~1.6초라 풀스캔 한 번보다 싸다. 축소 시드(2,000행) 제거는 0.471초다.
 
 | | 수정 전 | 수정 후 |
 |---|---|---|
-| `99-teardown.sql` (600만 행) | 3시간+ 미완 | **0.471초** |
+| `99-teardown.sql` (600만 행) | 3시간+ 미완 | **58.2초** |
+| `99-teardown.sql` (축소 시드 2,000행) | 측정 안 함 | 0.471초 |
 
 ### 6.2 `error.log` grep이 실행 불가능한 지시였다
 
@@ -607,8 +608,9 @@ nginx 2홉과 Next 처리는 그 위에 얇게 얹힌다. 008 4.3절의 "응답�
 | `02` (A군) | `schedule_seats` 2,000 | 0.356 s |
 | `01-bulk-catalog.sql` | 공연 1,000 / 회차 3,000 | 0.448 s |
 | `02` (B군) | `schedule_seats` 6,000,000 | **1 m 58 s** (10만 행당 1.14 s) |
-| `99-teardown.sql` (수정 후) | 600만 행 제거 + VACUUM FULL | **0.471 s** |
-| `99-teardown.sql` (수정 전) | 같음 | **3시간+ 미완** |
+| `99-teardown.sql` (수정 후) | 600만 행 제거 + VACUUM FULL | **58.2 s** |
+| `99-teardown.sql` (수정 후) | 축소 시드 2,000행 제거 + VACUUM FULL | 0.471 s |
+| `99-teardown.sql` (수정 전) | 600만 행 제거 | **3시간+ 미완** |
 | Lighthouse 1회 | | 11.7 s |
 
 006이 `02`를 70초로 기록했는데 이 PC에서는 118초다. **006의 시딩 시간은 호스트에 따라 1.7배
@@ -768,7 +770,7 @@ snap
 
 # 9. B군으로 전환. nginx도 재시작해야 한다 (6.3절)
 pg -f - < load-test/sql/99-teardown.sql
-# -> venue_left 0 | schedule_seats_left 26894 | schedule_seats_size 2728 kB   (0.47초)
+# -> venue_left 0 | schedule_seats_left 26894 | schedule_seats_size 2728 kB
 #    느리면 [0/3]의 임시 인덱스가 빠진 것이다 (6.1절)
 docker compose -f docker-compose.prod.yml exec -T redis redis-cli FLUSHALL
 docker compose -f docker-compose.prod.yml restart backend1 backend2
