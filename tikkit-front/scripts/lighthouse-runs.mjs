@@ -130,7 +130,10 @@ function extract(report) {
   const byType = new Map();
   let transferTotal = 0;
   for (const item of requests) {
-    const type = item.resourceType ?? "Other";
+    // resourceType이 없는 항목(리다이렉트 등)을 Other에 합치면 안 된다. Lighthouse의
+    // Other에는 favicon이 들어가는데, 거기에 본문 0바이트 리다이렉트가 섞이면 "favicon이
+    // 몇 바이트인가"를 표에서 읽을 수 없게 된다.
+    const type = item.resourceType ?? "(타입 없음)";
     const entry = byType.get(type) ?? { type, count: 0, transfer: 0, decoded: 0 };
     entry.count += 1;
     entry.transfer += item.transferSize ?? 0;
