@@ -6,7 +6,7 @@
 
 ## 진행 상황
 
-**지정석 전환 + 운영 기반 완료, 성능 측정 시작 — Phase 0~7 완료 & Phase 8 진행 중, 28/35 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
+**지정석 전환 + 운영 기반 완료, 성능 개선 진행 중 — Phase 0~7 완료 & Phase 8 진행 중, 32/37 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
