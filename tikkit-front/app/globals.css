@@ -1,11 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-/* 폰트는 CSS @import가 아니라 app/layout.tsx의 next/font/local이 선언한다 (Task 030_2).
-   dynamic-subset(@font-face 92개)은 실제로 쓰는 글자 조각만 받아서 전송량은 작지만 요청이
-   8~11개로 늘고, nginx가 HTTP/1.1이라 커넥션 6개 제한에 걸려 2라운드가 된다. 요청을 1개로
-   되돌리는 쪽을 재 보려고 단일 서브셋 파일로 바꿨다 — 바이트는 늘고 요청은 줄어드는 거래다.
-   파일은 scripts/build-font-subset.mjs가 만들고, 굵기 범위와 대체 글꼴은 layout.tsx에 있다. */
+/* 전체 폰트(woff2 1개 2,009KB) 대신 unicode-range로 쪼갠 서브셋을 쓴다. 전체 CSS는
+   브라우저가 쓰지도 않는 한자·일문까지 통째로 받게 해서 Task 030 측정에서 전송량의
+   88%를 차지했다(009 4.1절). 같은 패키지의 dynamic-subset은 @font-face 92개로 나뉘어
+   있어 실제로 쓰는 글자 범위만 내려온다. font-family 이름이 양쪽 같아서
+   --font-sans는 건드릴 필요가 없다. */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -63,10 +64,7 @@
 :root {
   /* TIKKIT 브랜드: 퍼플(primary) + 핑크(highlight). accent는 shadcn 관례상 hover 배경이라
      강한 핑크 대신 옅은 틴트를 쓴다. 자세한 근거는 docs/ROADMAP.md "브랜드 디자인 토큰" 참조. */
-  /* --font-pretendard는 next/font/local이 <html>에 심는 변수다. 그 안에 이미 대체 글꼴
-     목록이 들어 있지만(layout.tsx의 fallback), 변수 자체가 비는 경우(폰트 로드 실패,
-     클래스 미적용)를 대비해 뒤에도 남겨둔다. */
-  --font-sans: var(--font-pretendard), -apple-system, BlinkMacSystemFont,
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
     system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo",
     "Noto Sans KR", "Malgun Gothic", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
