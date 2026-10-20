@@ -16,6 +16,26 @@ export const GRADE_FILL: Record<Grade, string> = {
 
 const SEAT_RADIUS = 1.5;
 
+/** 둥근 모서리의 직선 구간 길이. 양쪽 모서리 반지름을 뺀 값이다. */
+const SEAT_STRAIGHT = SEAT_SIZE - SEAT_RADIUS * 2;
+
+/**
+ * 좌석 하나의 path 명령 중 좌표를 뺀 나머지. 좌석 크기가 전부 같아서 상수로 뽑힌다.
+ *
+ * 원호(a) 대신 2차 베지어(q)를 쓴다. 반지름 1.5에서 사분원과의 최대 오차가 0.1 단위 미만이라
+ * 눈에 안 보이고, 명령 길이는 a 쪽이 좌석당 30바이트쯤 더 길다.
+ */
+const SEAT_SUBPATH_TAIL =
+  `h${SEAT_STRAIGHT}` +
+  `q${SEAT_RADIUS} 0 ${SEAT_RADIUS} ${SEAT_RADIUS}` +
+  `v${SEAT_STRAIGHT}` +
+  `q0 ${SEAT_RADIUS} ${-SEAT_RADIUS} ${SEAT_RADIUS}` +
+  `h${-SEAT_STRAIGHT}` +
+  `q${-SEAT_RADIUS} 0 ${-SEAT_RADIUS} ${-SEAT_RADIUS}` +
+  `v${-SEAT_STRAIGHT}` +
+  `q0 ${-SEAT_RADIUS} ${SEAT_RADIUS} ${-SEAT_RADIUS}` +
+  "z";
+
 interface StaticSeatLayerProps {
   seats: ScheduleSeatResponse[];
   layout: SeatMapLayout;
@@ -25,37 +45,59 @@ interface StaticSeatLayerProps {
 /**
  * 고를 수 없는 좌석(다른 등급 + 이미 팔린 좌석)을 그린다.
  *
- * 선택 상태와 무관한 레이어라 memo로 끊어낸다. 3,000석 공연장에서 좌석 하나를 누를 때마다
- * 2,850개 rect를 다시 만들면 클릭이 눈에 보이게 밀린다. React Compiler가 꺼져 있어
- * (next.config.ts에 설정 없음) 자동 메모이제이션은 기대할 수 없다.
+ * 좌석마다 <rect>를 만들지 않고 "같은 색으로 칠할 좌석"끼리 하나의 <path>로 합친다
+ * (Task 030_2). 색 조합이 등급 수 + 팔린 좌석 한 종류뿐이라 path는 최대 5개다.
+ *
+ * ★ 이건 전송량 레버가 아니다 ★
+ *   rect 하나의 마크업과 좌석 하나의 path 명령이 둘 다 80바이트 안쪽이라 바이트는 거의
+ *   그대로다. 줄어드는 것은 DOM 노드 수다 — SVG 요소 하나하나가 브라우저 메모리의 실객체라서
+ *   10,000석 공연장이면 선택 불가 좌석 6,000개가 노드 6,000개였고, 합치면 4개가 된다.
+ *   ROADMAP이 Task 030_2의 근거를 "전송량이 아니라 확장성"으로 적은 지점이 여기다.
+ *
+ * 선택 상태와 무관한 레이어라 memo는 그대로 둔다. 다만 memo가 막아주는 것은 "클릭할 때
+ * 다시 그리는 비용"이고, 이 변경이 줄이는 것은 "처음 만드는 노드 수와 그 메모리"다.
+ * 둘은 다른 비용이라 한쪽이 있다고 다른 쪽이 해결되지 않는다.
+ *
+ * 좌석끼리 겹치지 않으므로 그리는 순서를 색깔별로 묶어도 겉모습은 같다.
  */
 const StaticSeatLayer = memo(function StaticSeatLayer({
   seats,
   layout,
   gradeMap,
 }: StaticSeatLayerProps) {
+  const groups = new Map<string, { className: string; commands: string[] }>();
+
+  for (const seat of seats) {
+    const grade = gradeMap.get(seat.ticketGradeId);
+    const sold = seat.status !== "AVAILABLE";
+    // 팔린 좌석은 등급과 무관하게 한 덩어리다. 등급을 못 찾은 좌석(gradeMap에 없음)은
+    // 원래도 fill 없이 흐리게만 그려졌으므로 그 상태 그대로 따로 묶는다.
+    const key = sold ? "sold" : (grade?.grade ?? "unknown");
+
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = {
+        // 팔린 좌석은 등급 색을 지우고 회색으로, 다른 등급은 색은 두고 흐리게 —
+        // "살 수 없음"과 "지금 고르는 등급이 아님"을 다른 축으로 구분한다.
+        className: cn(
+          sold ? "fill-muted-foreground/35" : grade && GRADE_FILL[grade.grade],
+          !sold && "opacity-25"
+        ),
+        commands: [],
+      };
+      groups.set(key, group);
+    }
+
+    group.commands.push(
+      `M${seatX(seat, layout) + SEAT_RADIUS} ${seatY(seat, layout)}${SEAT_SUBPATH_TAIL}`
+    );
+  }
+
   return (
     <g aria-hidden="true">
-      {seats.map((seat) => {
-        const grade = gradeMap.get(seat.ticketGradeId);
-        const sold = seat.status !== "AVAILABLE";
-        return (
-          <rect
-            key={seat.id}
-            x={seatX(seat, layout)}
-            y={seatY(seat, layout)}
-            width={SEAT_SIZE}
-            height={SEAT_SIZE}
-            rx={SEAT_RADIUS}
-            // 팔린 좌석은 등급 색을 지우고 회색으로, 다른 등급은 색은 두고 흐리게 —
-            // "살 수 없음"과 "지금 고르는 등급이 아님"을 다른 축으로 구분한다.
-            className={cn(
-              sold ? "fill-muted-foreground/35" : grade && GRADE_FILL[grade.grade],
-              !sold && "opacity-25"
-            )}
-          />
-        );
-      })}
+      {[...groups].map(([key, group]) => (
+        <path key={key} d={group.commands.join("")} className={group.className} />
+      ))}
     </g>
   );
 });
