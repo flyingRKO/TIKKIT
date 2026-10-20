@@ -17,6 +17,13 @@
  *
  * 실행 (환경변수 접두사를 package.json에 쓸 수 없다 — 009 6.6절, Windows npm이 cmd.exe로 돈다):
  *   LH_URL=http://localhost LH_RUNS=4 LH_LABEL=home-before LH_EXPECT_DOC_BYTES=46039 npm run lh
+ *
+ * LH_EXTRA_FLAGS로 lighthouse CLI 플래그를 덧붙일 수 있다 (Task 030_2). 쓰는 이유 —
+ * 좌석맵 FCP가 009_1에서 산포 25.2%로 "판단 불가"였고, after에서 5회가 491~494ms에 몰리는데
+ * 1회만 370ms로 빠졌다. 그 빠른 모드가 Lantern 시뮬레이션 산물인지 보려면 스로틀을 끈 군이
+ * 필요하다. 거기서 사라지면 시뮬레이션 산물로 확정되고, "FCP를 보조 지표로 내린다"는 판단에
+ * 근거가 붙는다:
+ *   LH_URL=... LH_RUNS=6 LH_LABEL=seatmap-nothrottle LH_EXTRA_FLAGS=--throttling-method=provided npm run lh
  */
 
 import { spawnSync } from "node:child_process";
@@ -30,6 +37,18 @@ const nodeRequire = createRequire(import.meta.url);
 // Windows에서 npx는 .cmd라 shell: true가 필요하고, 그러면 URL 따옴표 처리가 cmd.exe에
 // 달려서 조용히 어긋날 여지가 생긴다. 경로를 직접 집으면 그 변수가 없어진다.
 const LIGHTHOUSE_CLI = nodeRequire.resolve("lighthouse/cli/index.js");
+
+/**
+ * LH_EXTRA_FLAGS를 공백으로 쪼갠다.
+ *
+ * 값 안에 공백이 들어가는 플래그(--chrome-flags="a b")는 이 방식으로 못 넘긴다. 그건 이미
+ * 아래 고정 인자에 있고, 바꿔야 하면 코드를 고치는 쪽이 낫다 — 셸 따옴표 해석을 흉내내기
+ * 시작하면 009 6.6절(Windows npm이 cmd.exe로 돈다)과 같은 종류의 함정이 생긴다.
+ */
+const EXTRA_FLAGS = (process.env.LH_EXTRA_FLAGS ?? "")
+  .trim()
+  .split(/\s+/)
+  .filter((flag) => flag !== "");
 
 /** 산포가 이 값을 넘으면 수치를 쓰되 "판단 불가"로 표시한다 (008의 규율). */
 const UNRELIABLE_SPREAD = 0.2;
@@ -105,6 +124,7 @@ function runLighthouse(url, outPath) {
       `--output-path=${outPath}`,
       "--chrome-flags=--headless=new --no-sandbox --disable-gpu",
       "--quiet",
+      ...EXTRA_FLAGS,
     ],
     { stdio: ["ignore", "ignore", "inherit"] }
   );
@@ -172,6 +192,11 @@ rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
 console.log(`\n[${label}] ${url} — ${runs}회`);
+if (EXTRA_FLAGS.length > 0) {
+  // 추가 플래그는 측정 조건을 바꾼다. 어느 회차를 어떤 자로 쟀는지 로그에 남아야
+  // 다른 조건의 before/after를 섞는 사고를 막을 수 있다 (007·008이 계속 부딪힌 것).
+  console.log(`  추가 플래그: ${EXTRA_FLAGS.join(" ")}`);
+}
 if (expectDocBytes === null) {
   console.log("  LH_EXPECT_DOC_BYTES가 없다. 무결성 검사를 건너뛴다 (첫 측정이면 정상).");
 } else {

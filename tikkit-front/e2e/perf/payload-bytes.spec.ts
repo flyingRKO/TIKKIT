@@ -42,11 +42,21 @@ test.describe("좌석맵 전송량", () => {
 
     // 좌석이 실제로 그려졌는지 먼저 확인한다. 빈 좌석맵을 재면 바이트가 작게 나오고
     // 그게 "개선"으로 보이는 사고가 난다.
-    const seatCounts = await page.evaluate(() => ({
-      total: document.querySelectorAll("rect").length,
-      selectable: document.querySelectorAll('rect[role="checkbox"]').length,
-    }));
-    expect(seatCounts.total, "좌석 rect가 없다 — 시드나 URL을 확인해라").toBeGreaterThan(100);
+    //
+    // rect 개수만 세면 안 된다 — Task 030_2가 정적 좌석을 등급별 <path>로 합치면서 rect 수가
+    // "선택 가능 좌석 수"로 떨어진다. 그러면 이 검사가 개선 자체를 오염으로 오판한다.
+    // path의 서브패스('M' 명령) 수를 같이 세서 "그려진 좌석 총수"로 판정한다.
+    const seatCounts = await page.evaluate(() => {
+      const staticLayer = document.querySelector('svg[role="group"] g[aria-hidden="true"]');
+      let pathSubpaths = 0;
+      for (const path of Array.from(staticLayer?.querySelectorAll("path") ?? [])) {
+        pathSubpaths += ((path.getAttribute("d") ?? "").match(/M/gi) ?? []).length;
+      }
+      const rectTotal = document.querySelectorAll("rect").length;
+      const selectable = document.querySelectorAll('rect[role="checkbox"]').length;
+      return { rectTotal, selectable, pathSubpaths, drawn: rectTotal + pathSubpaths };
+    });
+    expect(seatCounts.drawn, "그려진 좌석이 없다 — 시드나 URL을 확인해라").toBeGreaterThan(100);
 
     // 리소스 타입별 전송/디코드 바이트. 둘의 차이가 압축 효과다.
     const byType = new Map<string, ResponseRow>();
@@ -127,7 +137,7 @@ test.describe("좌석맵 전송량", () => {
       {
         항목: "└ SSR 마크업 등 나머지",
         KB: round((htmlBytes - inline.rscBytes - inline.otherScriptBytes) / 1024),
-        비고: `좌석 rect ${seatCounts.total}개(선택 가능 ${seatCounts.selectable}개)`,
+        비고: `그린 좌석 ${seatCounts.drawn}개(rect ${seatCounts.rectTotal} / path 서브패스 ${seatCounts.pathSubpaths} / 선택 가능 ${seatCounts.selectable})`,
       },
     ]);
   });
