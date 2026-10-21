@@ -40,6 +40,52 @@ TIKKIT/
 **FE 전용 에이전트**는 `tikkit-front/.claude/agents/`에 있습니다.
 **BE 전용 에이전트**는 `tikkit-back/.claude/agents/`에 있습니다.
 
+## 스킬 안내
+
+`.claude/skills/`에 설치된 스킬입니다. FE/BE 공통으로 보입니다.
+
+| 스킬 | 용도 | TIKKIT에서 |
+|-----|-----|----------|
+| `search-first` | 코드 짜기 전에 npm/PyPI/MCP/GitHub에 이미 있는 해법을 먼저 검색 → 채택/확장/직접구현 결정 | FE/BE 공통. 새 기능·의존성 추가 전에 사용 |
+| `ui-ux-pro-max` | UI/UX 설계 지식 DB 검색 (스타일 79종, 팔레트 192종, 폰트 조합 74종, UX 가이드라인 119개) | `tikkit-front` 화면 설계·접근성 점검 |
+| `ui-styling` | shadcn/ui + Tailwind 컴포넌트 구현 | `tikkit-front` (TailwindCSS v4) |
+| `design-system` | 디자인 토큰 3계층(primitive→semantic→component), CSS 변수 | `tikkit-front` 토큰 정리 시 |
+| `design` | 브랜드 아이덴티티·로고 생성 통합 스킬 | 당장 쓸 일 없음 |
+| `brand` | 브랜드 보이스·메시징 프레임워크 | 당장 쓸 일 없음 |
+| `banner-design` | 소셜/광고 배너 디자인 | 당장 쓸 일 없음 |
+| `slides` | Chart.js 기반 HTML 프레젠테이션 | 당장 쓸 일 없음 |
+
+`design`~`slides` 4개는 `ui-ux-pro-max` 설치 시 번들로 같이 깔린 것이다. 요청해서 받은 게 아니라 딸려온 것이므로, 필요 없다고 판단되면 폴더째 지워도 된다.
+
+### Python 의존성
+
+`ui-ux-pro-max`, `design-system` 등은 CSV 데이터를 `scripts/search.py`로 검색한다.
+**Python 3.13.15 설치됨** (2026-10-21, `winget install Python.Python.3.13`).
+설치 경로는 `C:\Users\wogns\AppData\Local\Programs\Python\Python313`이고, 사용자 PATH에서 `WindowsApps` 앞에 등록되어 있다.
+
+> Windows의 `WindowsApps\python`은 Microsoft Store 스텁이다. 실행하면 `Python` 한 줄만 찍고 종료한다(exit 0).
+> PATH 순서상 실제 Python이 먼저 잡히지만, **Python 설치 전에 띄워둔 터미널은 옛 PATH를 물고 있어서 스텁이 잡힌다.** 그런 셸에서는 새 터미널을 열어야 한다.
+
+검증:
+```bash
+python --version                                              # Python 3.13.15
+cd .claude/skills/ui-ux-pro-max
+python scripts/validate_data.py                               # OK: validated 12 domain files, 22 stack files
+python scripts/search.py "<query>" --domain style -n 3        # 도메인 검색
+python scripts/search.py "<query>" --design-system -p "TIKKIT" # 디자인 시스템 추천
+```
+
+Windows에서는 `python3`이 아니라 `python`을 쓴다 (SKILL.md 본문은 `python3` 기준으로 적혀 있다).
+
+### 스킬 업데이트
+
+```bash
+npx ui-ux-pro-max-cli@latest update --ai claude   # TIKKIT 루트에서 실행
+```
+
+> **주의**: `ui-ux-pro-max/SKILL.md`는 원본이 영어+중국어 혼용이라 중국어 구역(When to Apply, 아이콘 가이드, 트리거 예시, 규칙표 주석)을 한국어로 번역해뒀다.
+> `update`를 돌리면 원본으로 덮어써지므로, 번역이 필요하면 업데이트 후 다시 작업해야 한다. 원본 템플릿은 `templates/base/skill-content.md` 하나뿐이고 레포에 다국어 SKILL.md는 없다.
+
 ## 공통 개발 규칙
 
 ### AI 협업 원칙 (Karpathy's 4 Rules)
