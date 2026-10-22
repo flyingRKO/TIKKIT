@@ -13,7 +13,7 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import java.net.URI;
 
 /**
- * Lettuce 연결 팩토리. 세션(Task 026)과 조회 캐시(Task 029)가 공유한다.
+ * Lettuce 연결 팩토리. 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031)이 공유한다.
  *
  * <h2>왜 자동설정을 쓰지 않고 직접 만드나</h2>
  * {@code spring-boot-starter-session-data-redis}는 {@code spring-boot-starter-data-redis}를 끌고 오고,
@@ -31,7 +31,8 @@ import java.net.URI;
  * Task 026에서는 이 빈을 {@code SessionRedisConfig}가 {@code tikkit.auth.session-store=redis}일 때만
  * 만들었다. 캐시가 들어오면서 조건이 하나 더 필요해졌다 — 로컬 개발에서
  * {@code session-store=memory} + {@code cache.type=redis} 조합을 써야 하기 때문이다(세션까지 Redis로
- * 올리면 통합 테스트가 Redis를 기다린다). 둘 중 <b>하나라도</b> Redis를 요구하면 팩토리를 만든다.
+ * 올리면 통합 테스트가 Redis를 기다린다). Task 031에서 대기열 조건이 세 번째로 붙었다.
+ * 셋 중 <b>하나라도</b> Redis를 요구하면 팩토리를 만든다.
  * <p>
  * {@code @ConditionalOnProperty}는 여러 개를 붙여도 AND로 묶이므로 {@link AnyNestedCondition}으로
  * OR를 만든다. 중첩 클래스마다 조건을 하나씩 달고, 하나라도 맞으면 통과한다.
@@ -82,6 +83,14 @@ public class RedisConnectionConfig {
 
         @ConditionalOnProperty(prefix = "tikkit.cache", name = "type", havingValue = "redis")
         static class CacheNeedsRedis {
+        }
+
+        /**
+         * 대기열 (Task 031). 세션·캐시를 끄고 <b>대기열만</b> 켜는 조합이 가능해지는 지점이다 —
+         * 대기열 통합 테스트가 캐시 컨텍스트를 건드리지 않고 돌아야 해서 필요하다.
+         */
+        @ConditionalOnProperty(prefix = "tikkit.queue", name = "enabled", havingValue = "true")
+        static class QueueNeedsRedis {
         }
     }
 }
