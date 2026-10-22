@@ -13,6 +13,7 @@ import com.tikkit.api.domain.payment.entity.Payment;
 import com.tikkit.api.domain.payment.entity.PaymentMethod;
 import com.tikkit.api.domain.payment.entity.PaymentStatus;
 import com.tikkit.api.domain.payment.gateway.PaymentGateway;
+import com.tikkit.api.domain.queue.service.QueueGateway;
 import com.tikkit.api.domain.payment.repository.PaymentRepository;
 import com.tikkit.api.domain.performance.entity.Grade;
 import com.tikkit.api.domain.performance.entity.Performance;
@@ -87,6 +88,16 @@ class ReservationServiceTest {
 
     @Mock
     private PaymentGateway paymentGateway;
+
+    /**
+     * 대기열 입장권 가드 (Task 031).
+     * <p>
+     * {@code requireAdmitted}가 void라서 목의 기본 동작이 그대로 "통과"가 된다 — 여기서는
+     * 대기열을 검증하지 않으므로 스텁을 두지 않는다. 대기열이 실제로 막는지는
+     * {@code QueuePassInterceptorTest}가 Redis를 띄워 확인한다.
+     */
+    @Mock
+    private QueueGateway queueGateway;
 
     /**
      * 예매 카운터(Task 025)를 검증하려면 실제 레지스트리가 필요하다.
