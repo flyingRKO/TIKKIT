@@ -37,19 +37,19 @@ import java.net.URI;
  * OR를 만든다. 중첩 클래스마다 조건을 하나씩 달고, 하나라도 맞으면 통과한다.
  *
  * <h2>Redis가 없어도 기동되는가</h2>
- * Lettuce는 지연 연결이라 팩토리를 만드는 것만으로는 접속하지 않는다. 그래서 Redisson 스타터가
- * 겪던 "Redis 없으면 컨텍스트가 깨진다"({@code docs/improvements/003-redis-distributed-lock.md} 3절)는
- * 재발하지 않고, 대신 첫 접근에서 실패한다.
+ * Lettuce는 지연 연결이라 팩토리를 만드는 것만으로는 접속하지 않는다. 그래서 Task 020의 Redisson
+ * 스타터가 겪던 "Redis 없으면 컨텍스트가 깨진다"({@code docs/improvements/003-redis-distributed-lock.md}
+ * 3절)는 재발하지 않고, 대신 첫 접근에서 실패한다.
  * <p>
  * 단 {@code spring.session.data.redis.repository-type: indexed}는 예외다 — 기동 시점에
  * {@code CONFIG SET}으로 keyspace notification을 켜므로 Redis가 없으면 기동이 깨진다.
  * indexed를 고른 이유는 강제 로그아웃(특정 회원의 세션 전부 찾아 삭제)이 indexed 전용 API라서다.
  * <b>이 비용은 세션을 Redis로 둘 때만 발생한다</b> — 캐시만 Redis로 켜면 지연 연결 그대로다.
  *
- * <h2>주소를 Redisson과 공유한다</h2>
- * {@code tikkit.redis.address}는 Redisson 형식({@code redis://host:port})이라 Lettuce가 쓰는
- * host/port로 쪼개야 한다. 프로퍼티를 두 개로 늘리지 않은 이유는 "Redis가 어디 있나"는
- * 하나의 사실이고, 두 벌로 두면 한쪽만 고치는 사고가 생긴다.
+ * <h2>주소 프로퍼티는 용도별로 나누지 않는다</h2>
+ * {@code tikkit.redis.address}는 {@code redis://host:port} URI 형식이라(Task 020의 Redisson
+ * 설정에서 온 형식이다) Lettuce가 쓰는 host/port로 쪼개야 한다. 프로퍼티를 용도별로 늘리지
+ * 않은 이유는 "Redis가 어디 있나"는 하나의 사실이고, 두 벌로 두면 한쪽만 고치는 사고가 생긴다.
  */
 @Configuration
 @Conditional(RedisConnectionConfig.RedisRequired.class)
@@ -67,8 +67,8 @@ public class RedisConnectionConfig {
      * 세션이든 캐시든 <b>하나라도</b> Redis를 요구하면 연결 팩토리를 만든다.
      * <p>
      * {@code PARSE_CONFIGURATION} 단계로 평가한다 — 빈 정의가 아니라 설정 클래스를 읽을지
-     * 결정하는 조건이라서, 빈 등록 순서에 의존하지 않는다({@code RedissonConfig}가
-     * {@code @ConditionalOnBean}을 피한 것과 같은 이유).
+     * 결정하는 조건이라서, 빈 등록 순서에 의존하지 않는다. {@code @ConditionalOnBean}은
+     * 등록 순서에 의존하므로 컴포넌트 스캔으로 올라오는 클래스에 붙이면 결과를 신뢰할 수 없다.
      */
     static class RedisRequired extends AnyNestedCondition {
 

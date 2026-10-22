@@ -31,7 +31,7 @@ public abstract class AbstractRedisSessionContainerTest extends AbstractContaine
     @DynamicPropertySource
     static void overrideSessionProperties(DynamicPropertyRegistry registry) {
         registry.add("tikkit.auth.session-store", () -> "redis");
-        // RedisConnectionConfig가 Redisson 형식(redis://host:port)을 파싱한다.
+        // RedisConnectionConfig가 redis://host:port URI를 파싱한다.
         registry.add("tikkit.redis.address",
                 () -> "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(REDIS_PORT));
     }

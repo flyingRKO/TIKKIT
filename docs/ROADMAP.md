@@ -15,7 +15,7 @@ TIKKIT은 공연 탐색, 등급·수량 기반 예매(10분 선점), 모의 결�
 | 테스트 DB | Testcontainers 2.0 PostgreSQL (H2 대체) | Task 002, 026_1 |
 | API 문서 | springdoc-openapi 3.1.1 | Task 006, 026_1 |
 | 인증 | Spring Security (세션 기반, in-memory HttpSession) | Task 008 |
-| 캐시/락/대기열 | Redis 7 + Redisson 4.8.0 | Task 020, 029, 031 |
+| 캐시/대기열 | Redis 7 + Lettuce (Redisson은 Task 031에서 제거 — 분산 락 기각 후 주입처 0건) | Task 020, 029, 031 |
 | 모니터링 | Actuator + Micrometer + Prometheus + Grafana | Task 025 |
 | 세션 저장소 | **Spring Session Data Redis**(indexed) — JWT와 비교 후 채택 | Task 026 |
 | 로드밸런서 | nginx 1.27-alpine (BE 2대 라운드로빈, `/actuator` 차단) | Task 026 |

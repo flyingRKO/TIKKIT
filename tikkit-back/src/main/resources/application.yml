@@ -22,7 +22,7 @@ spring:
       # Boot 4에는 spring.session.store-type 같은 저장소 선택 프로퍼티도, 비활성화 스위치도 없다
       # (스타터를 넣는 것 자체가 선택이라는 설계다).
       # 그래서 항상 제외하고, 세션·캐시 중 하나라도 redis일 때만 RedisConnectionConfig가
-      # 팩토리를 직접 만든다 — Redisson이 스타터를 피한 것과 같은 패턴이다.
+      # 팩토리를 직접 만든다 — Task 020이 Redisson 스타터를 피한 것과 같은 패턴이다.
       - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
       # 위를 제외하면 이것도 같이 제외해야 한다. Spring Data Redis 리포지토리 지원이
       # redisReferenceResolver 빈을 만들면서 **`redisTemplate`을 이름으로** 찾는데,
@@ -44,7 +44,7 @@ spring:
         # 그 API는 indexed 전용이다. default는 세션 조회 색인이 없다.
         #
         # 대가: indexed는 기동 시점에 CONFIG SET으로 keyspace notification을 켜므로
-        # **Redis가 없으면 컨텍스트 기동이 깨진다**. Redisson 스타터를 피한 이유(003 3절)와
+        # **Redis가 없으면 컨텍스트 기동이 깨진다**. Task 020이 Redisson 스타터를 피한 이유(003 3절)와
         # 같은 모양의 비용을 여기서는 의도적으로 받는 것이다. compose가 이미
         # depends_on: redis service_healthy를 걸고 있어 기동 순서는 보장된다.
         repository-type: indexed
@@ -112,10 +112,17 @@ tikkit:
   cache:
     type: ${CACHE_TYPE:none}
 
-  # Redis (Task 020에서 도입). 기본값을 false로 둬서 Redis 없이도 기동·테스트가 된다.
-  # 쓰려면 docker-compose로 redis를 띄우고 REDIS_ENABLED=true로 실행한다.
+  # Redis 주소 (Task 020에서 도입). 세션·캐시·대기열이 이 하나를 공유한다 —
+  # "Redis가 어디 있나"는 하나의 사실이고, 두 벌로 두면 한쪽만 고치는 사고가 생긴다.
+  #
+  # 연결을 켜는 토글은 용도별로 따로 있다 (auth.session-store / cache.type / queue.enabled).
+  # 전부 기본값이 "연결하지 않음"이라 Redis 없이도 기동·테스트가 된다.
+  #
+  # Task 020이 쓰던 redis.enabled(Redisson 클라이언트)는 Task 031에서 제거했다 — 분산 락을
+  # 기각한 뒤로 주입처가 0개였고, 대기열은 Lettuce + StringRedisTemplate으로 간다
+  # (docs/improvements/003-redis-distributed-lock.md 8절이 "Redis를 락이 아니라 원래 잘하는
+  # 일로 쓴다"고 예고한 그대로다).
   redis:
-    enabled: ${REDIS_ENABLED:false}
     address: ${REDIS_ADDRESS:redis://localhost:6379}
 
 # 모니터링 (Task 025). Boot 4에서 management.endpoint.<id>.enabled가 제거되고

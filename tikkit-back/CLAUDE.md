@@ -12,8 +12,8 @@
 | Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
 | Spring Web | - | REST API (`spring-boot-starter-webmvc`) |
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
-| Redis | 7 | 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031 예정) |
-| Redisson | 4.8.0 | Redis 클라이언트 (대기열용. 세션·캐시는 Lettuce를 쓴다) |
+| Redis | 7 | 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031) |
+| Lettuce | - | 유일한 Redis 클라이언트. 연결 팩토리는 `RedisConnectionConfig`가 만든다 |
 | Spring Cache | - | 조회 캐시 추상화 (Task 029). 저장소는 `tikkit.cache.type`으로 고른다 |
 | Actuator + Micrometer | - | 헬스·지표 노출 (`/actuator/health`, `/actuator/prometheus`, Task 025) |
 | Lombok | - | 보일러플레이트 코드 감소 |
@@ -143,18 +143,21 @@ docker-compose up -d
 
 DB 자격증명은 `application-dev.yml`에서 `${DB_USERNAME:tikkit_user}` 형태의 기본값을 쓴다. 평소엔 아무 설정 없이 `.env`의 값과 동일하게 동작하고, 필요할 때만(CI 등) `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` 환경변수로 재정의한다.
 
-Redis에 연결하는 토글이 **세 개**인데 서로 독립이다. 전부 기본값이 "연결하지 않음"이고, 이유는
+Redis에 연결하는 토글이 **두 개**인데 서로 독립이다. 전부 기본값이 "연결하지 않음"이고, 이유는
 Redis 없이도 기동과 테스트가 돌아야 하기 때문이다(`docs/improvements/003-redis-distributed-lock.md` 3절).
 
 | 프로퍼티 | 용도 | 기본값 |
 |---|---|---|
 | `tikkit.auth.session-store=redis` | Spring Session (Task 026) | `memory` |
 | `tikkit.cache.type=redis` | 조회 캐시 (Task 029) | `none` |
-| `tikkit.redis.enabled=true` | Redisson 클라이언트 (대기열, Task 031 예정) | `false` |
 
 주소는 `tikkit.redis.address` 하나를 공유한다("Redis가 어디 있나"는 하나의 사실이다).
-Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, **세션과 캐시 중 하나라도
-`redis`면** 생성된다(`AnyNestedCondition`으로 OR). 둘을 각각 켤 수 있어야 해서 AND가 아니다.
+Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, **하나라도 `redis`면**
+생성된다(`AnyNestedCondition`으로 OR). 각각 켤 수 있어야 해서 AND가 아니다.
+
+Task 020이 쓰던 `tikkit.redis.enabled`(Redisson 클라이언트)는 **Task 031에서 제거했다** —
+분산 락을 기각한 뒤로 주입처가 0개였고, 대기열도 Lettuce로 간다. 003 8절이 "Redis를 락이 아니라
+원래 잘하는 일(TTL 캐시, 정렬 집합)로 쓴다"고 예고한 그대로다.
 
 ## 조회 캐시 (Task 029)
 
