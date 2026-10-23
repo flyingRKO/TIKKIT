@@ -22,3 +22,8 @@ load-test/results/*
 # Python 바이트코드 캐시 (스킬 스크립트 실행 시 생성 — 인터프리터 버전에 묶여 재사용 불가)
 __pycache__/
 *.pyc
+
+# 모노레포 루트에서 npm 명령을 돌리면 의존성 없는 빈 lockfile이 생긴다.
+# 그게 있으면 Next가 워크스페이스 루트를 여기로 추정해 dev CSS 컴파일이 깨진다
+# (tikkit-front/next.config.ts의 turbopack.root 주석 참조). 다시 커밋되지 않게 막는다.
+/package-lock.json
