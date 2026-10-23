@@ -38,7 +38,7 @@ MVP 스키마(V1)와, 고도화 단계(Phase 6)에서 등급별 수량 모델을
 | members | id, email varchar(255), password varchar(100), name varchar(50), phone varchar(20), role varchar(20) (USER/ADMIN) | UNIQUE(lower(email)) |
 | venues | id, name varchar(100), address varchar(255) | UNIQUE(name) |
 | performances | id, title varchar(200), category varchar(20) (CONCERT/MUSICAL/THEATER/CLASSIC/SPORTS), description text, poster_url varchar(500), venue_id FK, running_minutes int, age_rating varchar(20), start_date date, end_date date, status varchar(20) (UPCOMING/ON_SALE/CLOSED) | idx(status, start_date) |
-| schedules (회차) | id, performance_id FK, show_at timestamptz, booking_open_at timestamptz, booking_close_at timestamptz | UNIQUE(performance_id, show_at); CHECK(booking_open_at < booking_close_at AND booking_close_at <= show_at) |
+| schedules (회차) | id, performance_id FK, show_at timestamptz, booking_open_at timestamptz, booking_close_at timestamptz, queue_enabled boolean NOT NULL DEFAULT false (V8, Task 031) | UNIQUE(performance_id, show_at); CHECK(booking_open_at < booking_close_at AND booking_close_at <= show_at); `queue_enabled`에는 인덱스를 걸지 않는다 — 읽는 쿼리가 10초에 1회이고 회차 테이블 전체 스캔이 ms 단위다 |
 | ticket_grades | id, schedule_id FK, grade varchar(10) (VIP/R/S/A), price numeric(12,0), total_quantity int, remaining_quantity int | UNIQUE(schedule_id, grade); UNIQUE(id, schedule_id) — 복합 FK 타깃; CHECK(0 <= remaining_quantity AND remaining_quantity <= total_quantity), CHECK(price >= 0) |
 | reservations | id, reservation_no varchar(20), member_id FK, schedule_id FK, ticket_grade_id FK, quantity smallint, unit_price numeric(12,0), total_amount numeric(12,0), status varchar(20) (PENDING/CONFIRMED/CANCELLED/EXPIRED), expires_at timestamptz, confirmed_at timestamptz, cancelled_at timestamptz | UNIQUE(reservation_no); CHECK(quantity BETWEEN 1 AND 4); CHECK(total_amount = unit_price * quantity); FK(ticket_grade_id, schedule_id) REFERENCES ticket_grades(id, schedule_id); idx(member_id, created_at DESC); 부분 인덱스 idx(expires_at) WHERE status = 'PENDING'; 부분 유니크 인덱스 uk(member_id, ticket_grade_id) WHERE status = 'PENDING' — 같은 회원의 같은 등급 중복 선점 방지 (V3_2, Task 020) |
 | payments | id, reservation_id FK, amount numeric(12,0), method varchar(20) (CARD/KAKAO_PAY/BANK_TRANSFER), status varchar(20) (PAID/REFUNDED), transaction_key varchar(64), paid_at timestamptz, refunded_at timestamptz | UNIQUE(reservation_id) — 1:1; UNIQUE(transaction_key) |
@@ -78,6 +78,7 @@ COMMENT ON COLUMN schedules.performance_id IS '소속 공연 (performances 참�
 COMMENT ON COLUMN schedules.show_at IS '공연 실제 시작 일시';
 COMMENT ON COLUMN schedules.booking_open_at IS '예매 시작 일시';
 COMMENT ON COLUMN schedules.booking_close_at IS '예매 마감 일시';
+COMMENT ON COLUMN schedules.queue_enabled IS '대기열 사용 여부. true면 좌석 조회·예매 선점 API가 Redis 대기열 입장권을 요구한다 (Task 031)';
 
 COMMENT ON TABLE ticket_grades IS '회차별 좌석 등급 및 가격·재고 (MVP는 지정석 없이 등급별 수량으로만 관리)';
 COMMENT ON COLUMN ticket_grades.schedule_id IS '소속 회차 (schedules 참조)';
@@ -146,6 +147,7 @@ erDiagram
         timestamptz show_at
         timestamptz booking_open_at
         timestamptz booking_close_at
+        boolean queue_enabled
     }
     TICKET_GRADES {
         bigint id PK
@@ -348,4 +350,4 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |
 | V6_1 | `shedlock` 테이블 생성 (다중 인스턴스 배치 중복 실행 방지) | 026 |
 | V7 | ~~조회 성능 개선을 위한 인덱스 추가~~ — **측정 결과 근거가 없어 만들지 않았다** (2절, 007 문서). 번호는 비워 둔다 | 028 |
-| V8 | 대기열 활성화 플래그 (`schedules.queue_enabled`) | 031 |
+| V8 | 대기열 활성화 플래그 (`schedules.queue_enabled` boolean NOT NULL DEFAULT false). 별도 테이블로 두지 않은 이유: 입장 속도·입장권 TTL은 전역 프로퍼티라 회차별로 보관할 설정이 이 boolean 하나뿐이다 | 031 |

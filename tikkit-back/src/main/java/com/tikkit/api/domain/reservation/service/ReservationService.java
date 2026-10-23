@@ -7,6 +7,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import com.tikkit.api.domain.member.repository.MemberRepository;
 import com.tikkit.api.domain.payment.entity.Payment;
 import com.tikkit.api.domain.payment.gateway.PaymentGateway;
+import com.tikkit.api.domain.queue.service.QueueGateway;
 import com.tikkit.api.domain.payment.repository.PaymentRepository;
 import com.tikkit.api.domain.performance.entity.Schedule;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
@@ -78,6 +79,7 @@ public class ReservationService {
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;
     private final MeterRegistry meterRegistry;
+    private final QueueGateway queueGateway;
 
     /**
      * 예매 카운터를 0으로 미리 등록한다.
@@ -119,6 +121,21 @@ public class ReservationService {
      */
     @Transactional
     public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
+        // 대기열 입장권 검증 (Task 031).
+        //
+        // 인터셉터가 아니라 여기서 부르는 이유: scheduleId가 **요청 본문**에 있다. 인터셉터가
+        // 본문을 읽으면 @RequestBody 역직렬화가 빈 스트림을 만난다. AOP로 숨기지 않은 이유는
+        // 어노테이션 하나로는 "왜 403인지" 추적이 안 되고, Task 020이 지운 @DistributedLock AOP를
+        // 되살리는 셈이 되기 때문이다. 호출 흐름에 한 줄로 보이는 쪽이 낫다.
+        //
+        // attempts 카운터 **밖에서** 부른다. 대기열 거절은 "예매 시도의 실패"가 아니라 시도에
+        // 도달하지 못한 것이다. 안에서 세면 예매 성공률이 대기열 거절로 오염되고, 거절 자체는
+        // tikkit.queue.pass.checks가 이미 세고 있어 중복이 된다.
+        //
+        // 대기열이 꺼져 있거나 이 회차의 플래그가 false면 DisabledQueueGateway/플래그 검사가
+        // 즉시 통과시킨다 — Redis를 건드리지 않는다.
+        queueGateway.requireAdmitted(request.scheduleId(), memberId);
+
         try {
             ReservationResponse response = createPending(memberId, request);
             attemptCounter(RESULT_SUCCESS, REASON_NONE).increment();

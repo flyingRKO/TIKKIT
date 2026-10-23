@@ -100,7 +100,7 @@ journey
 | `/my/reservations` | 내 예매 목록 |
 | `/my/reservations/[id]` | 예매 상세 |
 
-`/performances/[id]/schedules/[scheduleId]/seats`(좌석 선택)는 Phase 6(Task 023)에서 추가됐다. 공연 상세에서 회차·등급·매수를 고르면 `?gradeId=&quantity=`를 달고 이 화면으로 이동하고, 여기서 좌석을 골라 선점한다. `/queue/[scheduleId]`(대기열, Phase 9)가 추가될 예정이다.
+`/performances/[id]/schedules/[scheduleId]/seats`(좌석 선택)는 Phase 6(Task 023)에서 추가됐다. 공연 상세에서 회차·등급·매수를 고르면 `?gradeId=&quantity=`를 달고 이 화면으로 이동하고, 여기서 좌석을 골라 선점한다. `/queue/[scheduleId]`(대기열, Phase 9)가 추가될 예정이다 — 백엔드 API는 Task 031에서 완성됐고 화면은 Task 032다.
 
 ## 부록 B: API (`/api/v1`)
 
@@ -119,9 +119,13 @@ journey
 | GET | /reservations/{id} | ✔ | 소유자 검증. 받은 좌석 목록 `seats` 포함 (Task 023) |
 | POST | /reservations/{id}/payments | ✔ | `{method}` → CONFIRMED. 선점 만료 후 요청 시 409 `RESERVATION_EXPIRED` |
 | POST | /reservations/{id}/cancel | ✔ | → CANCELLED (CONFIRMED는 공연 24시간 전까지만 가능, 재고 복원·결제 REFUNDED) |
+| POST | /queue/schedules/{id}/entries | ✔ | 대기열 진입. **멱등이라 200**(재호출이 기본 동작인데 201이면 거짓말이 된다). `QueueStatusResponse` 반환 (Task 031) |
+| GET | /queue/schedules/{id}/status | ✔ | 상태 폴링. 응답 스키마가 진입과 같다. 다음 폴링 간격은 `pollAfterSeconds`가 지시한다 (Task 031) |
+| DELETE | /queue/schedules/{id}/entries | ✔ | 대기열 이탈. 없는 항목을 지워도 200 (멱등, Task 031) |
 
 - **에러 포맷**: `{success: false, code, message, errors: []}`
-- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `DUPLICATE_PENDING_RESERVATION`(409, 같은 회원이 같은 등급에 이미 PENDING 선점을 가진 경우), `CANCEL_DEADLINE_PASSED`(409, CONFIRMED 예매를 공연 24시간 전 이후에 취소하려는 경우), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401)
+- **주요 에러 코드**: `SOLD_OUT`(409), `RESERVATION_EXPIRED`(409), `BOOKING_NOT_OPEN`(400), `INVALID_STATUS_TRANSITION`(409), `DUPLICATE_PENDING_RESERVATION`(409, 같은 회원이 같은 등급에 이미 PENDING 선점을 가진 경우), `CANCEL_DEADLINE_PASSED`(409, CONFIRMED 예매를 공연 24시간 전 이후에 취소하려는 경우), `UNAUTHORIZED`(401), `FORBIDDEN`(403), `DUPLICATE_EMAIL`(409), `INVALID_CREDENTIALS`(401), `QUEUE_PASS_REQUIRED`(403, 대기열을 켠 회차에서 입장 순서가 아직 아닌 경우), `QUEUE_PASS_EXPIRED`(403, 입장 유효 시간이 지난 경우)
+- **대기열 403을 쓰는 이유**: 인증은 됐고 권한이 아직 없다. 409는 상태 충돌이라 의미가 안 맞고 425 Too Early는 TLS early data 전용이라 오용이다. 프론트는 HTTP 상태가 아니라 `code` 필드로 "대기열로 보내기"와 진짜 권한 오류를 가른다. **대기열을 켠 회차의 좌석 조회는 비로그인이면 401이다** — 할 일이 줄 서기가 아니라 로그인이기 때문이고, 플래그가 꺼진 회차의 공개 조회는 그대로 유지된다 (Task 031)
 - **소유권 검증**: 타인 소유 예약(`GET/POST /reservations/{id}/...`)에 접근하면 403이 아닌 404를 반환한다 — 존재 여부 자체를 노출하지 않기 위함이다.
 - API 계약이 구현되면(Task 006) springdoc(`/swagger-ui.html`)이 진실의 원천이 되고, 이 표는 요약으로만 유지한다.
 

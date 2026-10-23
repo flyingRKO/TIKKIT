@@ -43,7 +43,7 @@ API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시�
 | 프론트엔드 | Next.js 16.2.3 (App Router), React 19.2.4, TypeScript 5, TailwindCSS v4 |
 | 백엔드 | Spring Boot 4.1.1, Java 21, Spring Data JPA(Hibernate 7.4) + QueryDSL + MyBatis |
 | 데이터베이스 | PostgreSQL 15 (Docker), Flyway |
-| 캐시·대기열 | Redis 7 + Redisson (Task 020 도입, `REDIS_ENABLED=true`일 때만 사용) |
+| 캐시·대기열 | Redis 7 + Lettuce (Task 020 도입. 세션·캐시·대기열이 용도별 토글로 각각 켜진다) |
 | 테스트·CI | JUnit 5 + Testcontainers (BE), Playwright (E2E), GitHub Actions |
 | 모니터링 | Actuator + Micrometer + Prometheus + Grafana (Task 025, `--profile monitoring`) |
 | 부하 테스트 | k6 2.3.0 (Task 027, `--profile load`, Prometheus remote write로 같은 대시보드에 수집) |
@@ -96,8 +96,9 @@ docker-compose up -d   # PostgreSQL + Redis 실행 (Docker Desktop 필요)
 ```
 
 기동 시 Flyway가 스키마와 dev 시드 데이터를 자동 적용합니다. Redis는 띄워만 두고 애플리케이션은
-쓰지 않습니다 — 캐시·대기열이 들어오는 Task 029·031까지는 `REDIS_ENABLED=true`로 실행할 때만
-연결합니다(Redis가 없어도 기동됩니다. 이유는 [003](docs/improvements/003-redis-distributed-lock.md) 3절).
+기본적으로 쓰지 않습니다 — 용도별 토글(`AUTH_SESSION_STORE=redis` / `CACHE_TYPE=redis` /
+`QUEUE_ENABLED=true`)을 켤 때만 연결합니다(Redis가 없어도 기동됩니다. 이유는
+[003](docs/improvements/003-redis-distributed-lock.md) 3절).
 
 테스트 계정(비밀번호 모두 `Password1!`):
 

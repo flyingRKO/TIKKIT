@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
 
   # Task 020(분산 락 비교 실험)에서 도입. Task 029(캐싱)·031(대기열)에서 계속 쓴다.
-  # 애플리케이션은 기본적으로 Redis를 쓰지 않는다 (application.yml의 tikkit.redis.enabled 기본값 false).
+  # 애플리케이션은 기본적으로 Redis를 쓰지 않는다 (session-store·cache.type·queue.enabled 전부 기본 off).
   redis:
     image: redis:7.4-alpine
     container_name: tikkit-redis

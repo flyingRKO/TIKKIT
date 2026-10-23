@@ -44,12 +44,15 @@ class CacheEvictionTest extends AbstractRedisCacheContainerTest {
         performanceId = jdbcTemplate.queryForObject(
                 "SELECT performance_id FROM schedules WHERE id = ?", Long.class, scheduleId);
 
-        // ShedLock 락 기록을 지운다. 이게 없으면 두 번째 테스트부터 배치가 조용히 건너뛰어진다 —
-        // @SchedulerLock(lockAtLeastFor = "55s")가 정상 종료 후에도 55초간 락을 들고 있고,
-        // AbstractConcurrencyTest.truncateAll()의 테이블 목록에 shedlock이 없어서 남는다.
-        // 증상이 "evict가 안 됐다"로 나타나서 캐시 문제로 오진하기 쉽다.
-        jdbcTemplate.update("DELETE FROM shedlock");
         // 캐시 키가 테스트마다 겹치지 않도록 AbstractRedisCacheContainerTest가 id 구간을 민다.
+        //
+        // 여기 있던 `DELETE FROM shedlock`은 Task 031에서 지웠다. "없으면 두 번째 테스트부터
+        // 배치가 조용히 건너뛰어진다"고 적혀 있었지만 **test 프로필에서는 락이 걸리지 않는다** —
+        // @EnableSchedulerLock과 LockProvider가 @Profile("!test")인 SchedulingConfig에만 있어서
+        // ShedLock 어드바이저 자체가 컨텍스트에 없고, @SchedulerLock 어노테이션은 그때 아무 일도
+        // 하지 않는다. 실증: QueueAdmissionTest가 lockAtLeastFor=900ms인 배치의 run()을 연속
+        // 세 번 불러 매번 입장이 일어난다(락이 걸렸다면 두 번째가 건너뛰어진다).
+        // 검증 없이 적힌 안심 문장이 테스트 코드에 남아 다음 사람이 따라 쓰는 걸 막으려고 지웠다.
     }
 
     @Test
@@ -89,7 +92,6 @@ class CacheEvictionTest extends AbstractRedisCacheContainerTest {
         // 엔티티에서 채우지 않는다). 그래서 **첫 배치는 항상 값을 바꾼다** — 이 단계를 빼고
         // 짰다가 "안 바뀌었는데 evict됐다"로 계속 깨졌다. 운영에서는 시드/배치가 이미 돌아서
         // 정착된 상태가 정상이다.
-        jdbcTemplate.update("DELETE FROM shedlock");
         scheduler.run();
         awaitPerformanceCachesCleared(performanceId, listCacheKey());
 
@@ -98,7 +100,6 @@ class CacheEvictionTest extends AbstractRedisCacheContainerTest {
 
         // when: 아무것도 바뀌지 않은 상태에서 배치를 다시 돌린다.
         // recalculateDerivedFields는 IS DISTINCT FROM으로 실제 변경 행만 UPDATE하므로 0을 돌려준다.
-        jdbcTemplate.update("DELETE FROM shedlock");
         scheduler.run();
 
         // then: 캐시가 남아 있다. 매번 비우면 배치 주기마다 적중률이 0으로 떨어진다.

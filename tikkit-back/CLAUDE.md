@@ -12,8 +12,8 @@
 | Spring Security | - | 인증 및 인가 (세션 기반, Task 008에서 도입) |
 | Spring Web | - | REST API (`spring-boot-starter-webmvc`) |
 | PostgreSQL | 15 | 메인 데이터베이스 (Docker) |
-| Redis | 7 | 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031 예정) |
-| Redisson | 4.8.0 | Redis 클라이언트 (대기열용. 세션·캐시는 Lettuce를 쓴다) |
+| Redis | 7 | 세션(Task 026)·조회 캐시(Task 029)·대기열(Task 031) |
+| Lettuce | - | 유일한 Redis 클라이언트. 연결 팩토리는 `RedisConnectionConfig`가 만든다 |
 | Spring Cache | - | 조회 캐시 추상화 (Task 029). 저장소는 `tikkit.cache.type`으로 고른다 |
 | Actuator + Micrometer | - | 헬스·지표 노출 (`/actuator/health`, `/actuator/prometheus`, Task 025) |
 | Lombok | - | 보일러플레이트 코드 감소 |
@@ -150,11 +150,15 @@ Redis 없이도 기동과 테스트가 돌아야 하기 때문이다(`docs/impro
 |---|---|---|
 | `tikkit.auth.session-store=redis` | Spring Session (Task 026) | `memory` |
 | `tikkit.cache.type=redis` | 조회 캐시 (Task 029) | `none` |
-| `tikkit.redis.enabled=true` | Redisson 클라이언트 (대기열, Task 031 예정) | `false` |
+| `tikkit.queue.enabled=true` | 대기열 (Task 031) | `false` |
 
 주소는 `tikkit.redis.address` 하나를 공유한다("Redis가 어디 있나"는 하나의 사실이다).
-Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, **세션과 캐시 중 하나라도
-`redis`면** 생성된다(`AnyNestedCondition`으로 OR). 둘을 각각 켤 수 있어야 해서 AND가 아니다.
+Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, **하나라도 Redis를
+요구하면** 생성된다(`AnyNestedCondition`으로 OR). 각각 켤 수 있어야 해서 AND가 아니다.
+
+Task 020이 쓰던 `tikkit.redis.enabled`(Redisson 클라이언트)는 **Task 031에서 제거했다** —
+분산 락을 기각한 뒤로 주입처가 0개였고, 대기열도 Lettuce로 간다. 003 8절이 "Redis를 락이 아니라
+원래 잘하는 일(TTL 캐시, 정렬 집합)로 쓴다"고 예고한 그대로다.
 
 ## 조회 캐시 (Task 029)
 
@@ -211,6 +215,118 @@ Lettuce 연결 팩토리는 `common/config/RedisConnectionConfig`가 만들고, 
 축출이 일어나면 세션 키도 대상이므로, Task 031 대기열로 메모리가 커지면 세션과 분리할지 다시
 판단한다. 분리가 공짜가 아닌 이유는 008 8절에 있다 — `RedisConnectionFactory` 빈이 둘이 되면
 Spring Session 자동설정이 캐시 팩토리에도 걸려서 "캐시만 켠다"가 세션까지 켠다.
+
+## 대기열 (Task 031)
+
+`tikkit.queue.enabled`로 켠다 — `false`(기본)면 `DisabledQueueGateway`가 올라가 **전부 통과**시키므로
+호출부를 지우지 않고도 기능이 완전히 꺼진다. `cache.type=none`이 `NoOpCacheManager`를 올리는 것과
+같은 구조다. 구현을 고르는 자리는 `domain/queue/config/QueueStrategyConfig` **한 곳**이고,
+Redis가 필요한 빈 전체가 그 안의 중첩 설정에 묶여 있다 — 빈마다 조건을 흩으면 "줄은 서는데 아무도
+입장하지 않는" 조합이 조용히 만들어진다.
+
+토글이 **두 층**이다. 둘을 혼동하면 디버깅이 길어진다.
+
+| 설정 | 의미 |
+|---|---|
+| `tikkit.queue.enabled` | 대기열 기능이 이 **애플리케이션**에 있는가 |
+| `schedules.queue_enabled` | 이 **회차**에 줄을 세우는가 (V8, 사람이 SQL로 켠다) |
+
+앞이 꺼져 있으면 뒤가 true여도 아무 일도 일어나지 않는다.
+
+### Redis 키는 회차당 두 개다
+
+```
+tikkit:queue:{12}:waiting   ZSET  member = memberId, score = 진입 epoch millis
+tikkit:queue:{12}:active    ZSET  member = memberId, score = 입장권 만료 epoch millis
+```
+
+중괄호는 **리터럴**이다(Redis Cluster hash tag). 지금은 standalone이라 영향이 없지만, 나중에 키
+포맷을 바꾸면 운영 중에 줄 서 있는 사람들의 큐가 사라진다. 이름은 `QueueKeys` 한 곳에 모은다.
+
+**활성 쪽이 SET + 토큰 키가 아니라 ZSET이다.** 로드맵 문구는 "활성 세트 + TTL 토큰"이었는데, 그러면
+토큰 키가 만료돼도 SET에 멤버가 영구히 남아 `SCARD`가 틀린다. score에 만료 시각을 넣으면 검증이
+`ZSCORE` 왕복 1회, 일괄 수거가 `ZREMRANGEBYSCORE` 명령 1개, 연장이 `ZADD GT` 명령 1개가 된다.
+테스트에서 만료를 `sleep` 없이 과거 score로 재현할 수 있는 것도 이 설계 덕이다.
+
+**별도 토큰을 발급하지 않는다.** 입장권의 실체는 `active` ZSET의 `(memberId → 만료시각)` 엔트리이고
+전송되는 비밀이 없다. 랜덤 UUID 토큰은 같은 인증 세션에 내려줄 수밖에 없어서 보안 이득이 0이다 —
+새 비밀을 만드는 게 아니라 같은 비밀을 두 번 적는 것이다.
+
+### 입장 순서가 설계의 핵심이다
+
+스케줄러 한 틱: `ZREMRANGEBYSCORE active`(만료 수거) → `ZRANGE waiting`(선두 N명) →
+**`ZADD active`(먼저)** → **`ZREM waiting`(나중)**.
+
+두 명령 사이에서 죽으면 사용자가 양쪽에 남는데, 상태 조회가 `active`를 먼저 보므로 **정상 입장**한다.
+남은 중복은 다음 틱이 치운다(`ZADD`가 score만 갱신하고 `ZREM`이 대기를 지우므로 분기가 필요 없다).
+거꾸로 하면 양쪽에서 사라져 **선두 몇 명이 조용히 맨 뒤로 간다** — 설명할 수 없고 로그에도 안 남는다.
+멱등성 방향을 at-most-once가 아니라 **at-least-once로 고정**하는 것이다.
+
+**Lua를 쓰지 않는다.** Lua도 "프로세스가 죽는 것"은 못 막고 비원자 창을 0.3ms에서 0으로 줄일 뿐인데,
+그 창에 끊긴 결과가 이미 무해하다. ShedLock이 단일 writer를 보장하므로 경쟁 자체도 없다.
+Lua가 필요해지는 조건은 ① ShedLock을 떼고 회차별 샤딩으로 갈 때 ② "빈자리가 나면 즉시 다음 사람
+입장"처럼 **요청 경로**에서 활성 인원을 늘려야 할 때다(그건 ShedLock이 못 막는다).
+
+진입은 `ZADD NX` 하나로 닫힌다 — 더블클릭·폴링 중복·새로고침이 순번을 밀지 않고, 재진입으로
+앞자리를 살 수도 없다.
+
+### 보호 대상은 둘뿐이다
+
+| 엔드포인트 | 보호 | 수단 |
+|---|---|---|
+| `GET /schedules/{id}/seats` | ✅ | `QueuePassInterceptor` |
+| `POST /reservations` | ✅ | `ReservationService`가 가드를 직접 호출 |
+| `GET /schedules/{id}/ticket-grades` | ❌ | 대기열 화면이 공연·가격을 보여줘야 한다 |
+| 결제·취소 | ❌ | **이미 좌석을 잡은 사람은 거래를 끝낼 수 있어야 한다** |
+
+`POST /reservations`가 인터셉터로 안 되는 이유: `scheduleId`가 **요청 본문**에 있어서 인터셉터가
+읽으면 `@RequestBody` 역직렬화가 빈 스트림을 만난다. AOP로 숨기지 않은 이유는 "왜 403인지"
+추적이 안 되고 Task 020이 지운 `@DistributedLock` AOP를 되살리는 셈이기 때문이다.
+
+**대기열을 켠 회차는 로그인이 필수다.** 좌석 조회는 `permitAll`인데(Task 022가 "자리를 보고 나서
+가입하는 흐름이 정상"이라고 의도적으로 열었다) `memberId`로 줄을 세워야 1인 1자리가 성립한다.
+`SecurityConfig`를 `authenticated()`로 올리지 않고 **인터셉터가 401을 던지는** 이유가 이것이다 —
+그러면 플래그가 꺼진 회차의 공개 조회가 그대로 보존된다.
+
+### `queue_enabled`를 요청마다 DB에서 읽지 않는다
+
+`QueueFlagRegistry`가 `volatile` 스냅샷 + 조회 시 자기 갱신(TTL 10초)으로 캐시한다.
+
+- **Spring Cache를 못 쓴다** — `cache.type` 기본값이 `none`이라 거기 얹으면 캐시를 끈 환경에서
+  좌석 조회마다 DB로 간다. 세 토글이 독립이어야 한다는 전제가 깨진다.
+- **`@Scheduled`로 갱신하면 안 된다** — `SchedulingConfig`가 `@Profile("!test")`라 테스트에서
+  스냅샷이 영원히 비고 **대기열 테스트 전체가 "플래그 off"로 조용히 통과한다.** 게다가 JVM 로컬
+  상태라 인스턴스마다 돌아야 해서 `@SchedulerLock`을 붙일 수 없는데, 그건 "새 `@Scheduled`에는
+  반드시 락" 규칙의 예외가 된다.
+- 스탬피드(TTL 직후 중복 재적재)는 **의도적으로 감수한다.** 쿼리가 ms 단위이고, 락으로 막으면
+  모든 조회가 락을 지난다.
+
+### 폴링 간격을 백엔드가 지시한다
+
+응답의 `pollAfterSeconds`로 내려준다(`rank<100` → 2초 / `<1,000` → 5초 / 그 외 10초, 입장·만료 시 0).
+10만 명이 2초 고정으로 폴링하면 상태 API 하나에 **50,000 RPS**가 몰려서, 좌석 API를 막아 번 여유를
+상태 API가 전부 먹는다. Redis는 버티지만 Tomcat 스레드와 nginx가 먼저 죽는다.
+
+예상 대기시간은 `rank / 초당 입장 인원`이고 **공칭 속도 기준이라 실제보다 낙관적이다**
+(`fixedDelay`라 실제 주기가 설정값보다 길다). 관측 속도로 계산하지 않는 이유는 분모가 흔들리면
+ETA의 단조 비증가가 깨지기 때문이다 — 진행바가 되감기면 사용자는 버그로 읽는다.
+
+### 알려진 한계
+
+- **입장권에 절대 상한이 없다.** 활동하면 무한 연장되므로 봇이 슬롯을 영구 점유할 수 있다.
+  상한을 두려면 `admittedAt`용 ZSET이 하나 더 필요하다(한 score에 두 시각을 담을 수 없다).
+  `booking_close_at`이 사실상 상한 역할을 한다.
+- **유령을 치우지 않는다.** 브라우저를 닫으면 `waiting` 엔트리가 남아 그 틱의 슬롯을 낭비하고
+  ETA가 과대 추정된다(사용자에게는 "생각보다 빨리 들어왔다"라 안전한 방향). 용량 기반 정책으로
+  바꾸면 `seen` ZSET이 필수가 되고, 그때 임계값은 **90초 이상**이어야 한다 — 브라우저가 백그라운드
+  탭 타이머를 1분에 1회로 스로틀하므로 짧으면 정상 사용자를 쫓아낸다.
+- **`allkeys-lru`가 대기열 키도 축출 대상이다.** 축출되면 멤버가 아니라 **큐 하나가 통째로**
+  날아가고 전원이 꼬리로 재진입해 순서가 리셋된다. 대기 10만 명이 약 10MB라 상한 512MB에서
+  일어나지 않을 계산이지만, Task 033에서 `evicted_keys`를 확인한다.
+- **활성 인원 상한이 없다.** 입장 속도가 좌석 API 처리량보다 크면 대기열이 지연을 늦추기만 하고
+  막지 못한다. `admit-batch-size=50`에 근거가 없고 Task 033이 정한다.
+- **동시 진입의 상대 순서는 보장하지 않는다.** score가 epoch millis라 같은 ms에 둘이 들어오면
+  멤버 문자열 사전순으로 갈린다(`"10" < "9"`).
 
 ## 모니터링 (Task 025)
 

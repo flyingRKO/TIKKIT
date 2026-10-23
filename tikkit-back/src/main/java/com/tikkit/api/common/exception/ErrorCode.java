@@ -27,7 +27,14 @@ public enum ErrorCode {
     RESERVATION_EXPIRED(HttpStatus.CONFLICT, "선점 시간이 만료된 예약입니다."),
     INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 처리할 수 없는 요청입니다."),
     DUPLICATE_PENDING_RESERVATION(HttpStatus.CONFLICT, "이미 선점 중인 예약이 있습니다."),
-    CANCEL_DEADLINE_PASSED(HttpStatus.CONFLICT, "취소 가능 기한이 지났습니다.");
+    CANCEL_DEADLINE_PASSED(HttpStatus.CONFLICT, "취소 가능 기한이 지났습니다."),
+
+    // 대기열 도메인 (Task 031)
+    // 403을 쓰는 이유: 인증은 됐고 권한이 아직 없다. 409(상태 충돌)는 의미가 안 맞고
+    // 425 Too Early는 TLS early data 전용이라 오용이다.
+    // 프론트는 HTTP 상태가 아니라 code 필드로 "대기열로 보내기"와 진짜 권한 오류를 가른다.
+    QUEUE_PASS_REQUIRED(HttpStatus.FORBIDDEN, "대기열 입장 순서가 아닙니다."),
+    QUEUE_PASS_EXPIRED(HttpStatus.FORBIDDEN, "입장 유효 시간이 만료되었습니다. 다시 대기열에 참여해 주세요.");
 
     private final HttpStatus status;
     private final String message;
