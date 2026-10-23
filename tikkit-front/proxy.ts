@@ -20,5 +20,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/booking/:path*", "/my/:path*"],
+  // 대기열만 `:path*`가 아니라 **정확히 한 세그먼트**다 (Task 032). `/queue/:path*`로 하면
+  // 자식 세그먼트인 `/queue/123/status`(폴링 route handler)까지 걸려서, 쿠키가 없을 때
+  // 401 JSON 대신 로그인 HTML로 307이 나간다 — 클라이언트는 JSON 파싱에 실패하고
+  // 원인이 보이지 않는다. 대기열 화면 자체만 막고, 폴링의 인증 판단은 BE가 하게 둔다.
+  matcher: ["/booking/:path*", "/my/:path*", "/queue/:scheduleId"],
 };

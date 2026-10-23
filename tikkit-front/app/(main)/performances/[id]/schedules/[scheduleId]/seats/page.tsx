@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import { EmptyState } from "@/components/layout/empty-state";
 import { SeatMapSkeleton } from "@/components/performance/seat-map-skeleton";
 import { SeatSelector } from "@/components/performance/seat-selector";
+import { buttonVariants } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
 import { getPerformanceDetail, getScheduleSeats, getTicketGrades } from "@/lib/api/performances";
 import { formatDateTime } from "@/lib/format-date";
 import { GRADE_LABELS } from "@/lib/performance-labels";
+import { buildQueuePath } from "@/lib/queue-rules";
 import { getSaleStateNow, MAX_QUANTITY } from "@/lib/schedule-rules";
 import { buildSeatMapLayout } from "@/lib/seat-map";
+import { cn } from "@/lib/utils";
 import type { ScheduleSeatResponse, TicketGradeResponse } from "@/types/api";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -25,6 +29,29 @@ function toNotFound(error: unknown): never {
   throw error;
 }
 
+/**
+ * 좌석 조회 전용 에러 처리 (Task 032).
+ *
+ * 공연·등급 조회와 달리 좌석 조회에는 대기열 인터셉터가 걸려 있다. 세 가지가 더 온다:
+ *  - UNAUTHORIZED(401): 경로는 permitAll이므로 401은 **대기열 인터셉터만** 던질 수 있다.
+ *    즉 "대기열을 켠 회차 + 비로그인"이 확정이라 로그인 후 대기열로 이어붙인다
+ *  - QUEUE_PASS_REQUIRED(403): 줄을 선 적이 없다 → 대기열로 보내면 진입 API가 줄을 세운다
+ *  - QUEUE_PASS_EXPIRED(403): 입장권이 만료됐다 → **리다이렉트하지 않고** 대기열로 가는
+ *    안내를 그린다. 여기서 또 보내면 "입장 → 만료 → 대기열 → 입장"이 반복될 수 있다.
+ *    REQUIRED와 EXPIRED를 다르게 다루는 것만으로 루프가 왕복 2회에서 끊긴다
+ */
+function toSeatsAreaError(error: unknown, queuePath: string): never {
+  if (error instanceof ApiError) {
+    if (error.code === "UNAUTHORIZED") {
+      redirect(`/login?redirect=${encodeURIComponent(queuePath)}`);
+    }
+    if (error.code === "QUEUE_PASS_REQUIRED") {
+      redirect(queuePath);
+    }
+  }
+  return toNotFound(error);
+}
+
 interface SeatAreaProps {
   seatsPromise: Promise<ScheduleSeatResponse[]>;
   performanceId: number;
@@ -35,6 +62,7 @@ interface SeatAreaProps {
   selectedGrade: TicketGradeResponse;
   quantity: number;
   bookable: boolean;
+  queuePath: string;
 }
 
 /**
@@ -58,8 +86,30 @@ async function SeatArea({
   selectedGrade,
   quantity,
   bookable,
+  queuePath,
 }: SeatAreaProps) {
-  const seats = await seatsPromise.catch(toNotFound);
+  // QUEUE_PASS_EXPIRED만 null로 받아 막다른 안내를 그린다. 나머지는 toSeatsAreaError가
+  // 리다이렉트하거나 그대로 올린다(never를 반환하므로 아래 타입은 배열 | null이다).
+  const seats = await seatsPromise.catch((error: unknown) => {
+    if (error instanceof ApiError && error.code === "QUEUE_PASS_EXPIRED") {
+      return null;
+    }
+    return toSeatsAreaError(error, queuePath);
+  });
+
+  if (seats === null) {
+    return (
+      <EmptyState
+        message="입장 유효 시간이 지났습니다. 다시 대기열에 참여해 주세요."
+        action={
+          <Link href={queuePath} prefetch={false} className={cn(buttonVariants({ size: "lg" }))}>
+            대기열로 이동
+          </Link>
+        }
+      />
+    );
+  }
+
   const layout = buildSeatMapLayout(seats);
 
   return (
@@ -129,6 +179,8 @@ export default async function SeatSelectionPage({
   }
 
   const saleState = getSaleStateNow(schedule);
+  // 대기열로 되돌릴 때 쓰는 경로. 좌석 화면으로 다시 돌아올 값(등급·매수)을 그대로 싣는다.
+  const queuePath = buildQueuePath({ scheduleId, performanceId, gradeId: grade.id, quantity });
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 pt-8 pb-56 lg:pb-8">
@@ -171,6 +223,7 @@ export default async function SeatSelectionPage({
           selectedGrade={grade}
           quantity={quantity}
           bookable={saleState === "OPEN"}
+          queuePath={queuePath}
         />
       </Suspense>
     </main>

@@ -13,6 +13,7 @@ import {
   PAYMENT_METHODS,
   type ReservationActionState,
 } from "@/lib/actions/reservation-state";
+import { buildQueuePath, buildSeatsPath } from "@/lib/queue-rules";
 import type { PaymentMethod } from "@/types/api";
 
 // BE 기본 메시지("잔여 좌석이 없습니다." 등)보다 사용자가 다음에 뭘 해야 하는지 알려주는 문구로 바꿔서 보여준다.
@@ -23,6 +24,10 @@ const CREATE_ERROR_MESSAGES: Record<string, string> = {
   VALIDATION_ERROR: "선택한 회차·등급·수량을 다시 확인해주세요.",
   NOT_FOUND: "선택한 좌석을 찾을 수 없습니다. 배치도를 새로 불러왔으니 다시 골라주세요.",
   SEAT_MISMATCH: "고른 좌석과 매수가 맞지 않습니다. 좌석을 다시 골라주세요.",
+  // 아래 둘은 대기열로 리다이렉트하므로 보통 화면에 뜨지 않는다. 리다이렉트가 어떤 이유로
+  // 일어나지 않았을 때 사용자가 다음 행동을 알 수 있게 폴백으로 둔다.
+  QUEUE_PASS_REQUIRED: "대기열 입장 순서가 아닙니다. 대기열 화면에서 순번을 확인해주세요.",
+  QUEUE_PASS_EXPIRED: "입장 유효 시간이 지났습니다. 대기열에 다시 참여해주세요.",
 };
 
 const PAY_ERROR_MESSAGES: Record<string, string> = {
@@ -47,15 +52,8 @@ function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0;
 }
 
-/** 좌석 선택 화면 경로. 등급·매수가 쿼리에 있어야 그 화면이 성립한다. */
-function toSeatsPath(
-  performanceId: number,
-  scheduleId: number,
-  ticketGradeId: number,
-  quantity: number
-): string {
-  return `/performances/${performanceId}/schedules/${scheduleId}/seats?gradeId=${ticketGradeId}&quantity=${quantity}`;
-}
+// 좌석·대기열 경로 템플릿은 lib/queue-rules.ts로 옮겼다 (Task 032) — 대기열 화면도 같은
+// 경로를 만들어야 해서 템플릿이 두 벌이면 한쪽만 고치는 사고가 난다.
 
 // 기존 선점 예약을 찾는다. BE 목록 응답(ReservationSummaryResponse)에 scheduleId/ticketGradeId가 없어서
 // 공연명 + 회차 시각 + 등급으로 맞춰본다.
@@ -112,7 +110,8 @@ export async function createReservationAction(
     return { error: CREATE_ERROR_MESSAGES.SEAT_MISMATCH, resetSeatsAt: Date.now() };
   }
 
-  const seatsPath = toSeatsPath(performanceId, scheduleId, ticketGradeId, quantity);
+  const pathParams = { performanceId, scheduleId, gradeId: ticketGradeId, quantity };
+  const seatsPath = buildSeatsPath(pathParams);
 
   // redirect()는 내부적으로 예외를 던져서 동작하므로 try/catch 안에서 부르면 안 된다.
   // 그래서 이동할 곳만 변수에 담고 블록 밖에서 redirect 한다.
@@ -127,6 +126,13 @@ export async function createReservationAction(
         // 세션이 만료된 채로 예매를 눌렀다. 로그인 후 같은 등급·매수로 좌석 선택 화면에 돌아오게 한다.
         // 고른 좌석까지 되살리지는 않는다 — 돌아오는 사이에 남이 가져갔을 수 있다.
         redirect(`/login?redirect=${encodeURIComponent(seatsPath)}`);
+      }
+
+      // 대기열을 켠 회차인데 입장권이 없거나 만료됐다 (Task 032). 둘 다 할 일이 "줄 서기"라서
+      // 같은 곳으로 보낸다 — 좌석 페이지와 달리 여기서는 EXPIRED도 대기열로 보낸다.
+      // 선점 요청은 사용자가 방금 버튼을 누른 결과이므로 막다른 화면보다 다시 줄 세우는 게 맞다.
+      if (error.code === "QUEUE_PASS_REQUIRED" || error.code === "QUEUE_PASS_EXPIRED") {
+        redirect(buildQueuePath(pathParams));
       }
 
       if (error.code === "DUPLICATE_PENDING_RESERVATION") {
