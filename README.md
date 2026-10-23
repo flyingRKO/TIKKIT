@@ -6,11 +6,13 @@
 
 ## 진행 상황
 
-**지정석 전환 + 운영 기반 완료, 성능 개선 진행 중 — Phase 0~7 완료 & Phase 8 진행 중, 32/37 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
+**성능 개선까지 완료, 대기열 구현 중 — Phase 0~8 완료 & Phase 9 진행 중, 35/37 Task** — 회원가입·로그인부터 공연 탐색, 예매 선점, 모의 결제, 취소까지 한 흐름으로 동작하고(`v0.1.0-mvp`), 이 흐름은 Playwright E2E로 CI에서 검증합니다. 초과 판매·중복 선점·결제-만료 경쟁을 재현한 뒤 조건부 UPDATE와 DB 제약으로 막았고(`v0.2.0-concurrency`), 그 과정은 아래 각 섹션과 [`docs/improvements/`](docs/improvements/)에 재현 → 해결 → 수치로 기록했습니다.
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
-API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시켜 유지했기 때문에, 재고의 원천이 뒤집혔는데도 화면은 그대로였습니다. **Task 023(좌석 배치도 화면)** 에서 `posX`/`posY`로 SVG 배치도를 그려 사용자가 좌석을 직접 고르게 했고, 서버가 대신 앞자리를 집어주던 한시적 코드(`pickAvailableSeatIds`)가 사라졌습니다. 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
+API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시켜 유지했기 때문에, 재고의 원천이 뒤집혔는데도 화면은 그대로였습니다. **Task 023(좌석 배치도 화면)** 에서 `posX`/`posY`로 SVG 배치도를 그려 사용자가 좌석을 직접 고르게 했고, 서버가 대신 앞자리를 집어주던 한시적 코드(`pickAvailableSeatIds`)가 사라졌습니다. **오픈런 트래픽은 좌석 API 앞에서 줄을 세웁니다.** Redis ZSET 두 개(`waiting`/`active`)로 입장을 제어하고, `active`의 score에 **입장권 만료 시각**을 넣어 검증을 `ZSCORE` 왕복 한 번, 일괄 수거를 `ZREMRANGEBYSCORE` 한 명령으로 끝냅니다. 별도 토큰을 발급하지 않습니다 — 같은 인증 세션에 내려줄 수밖에 없어서 보안 이득이 0이기 때문입니다. 대기 화면은 백엔드가 지시하는 간격으로 폴링합니다(`pollAfterSeconds` 2/5/10초) — 10만 명이 2초 고정으로 묻으면 상태 API 하나에 50,000 RPS가 몰려서, 좌석 API를 막아 번 여유를 상태 API가 전부 먹습니다. 회차별 `queue_enabled` 플래그로 켜고, 꺼져 있으면 기존 흐름이 그대로 동작합니다. 부하 수치 검증은 Task 033에서 k6로 합니다.
+
+전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
 ## 스크린샷
 

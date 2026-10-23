@@ -100,7 +100,14 @@ journey
 | `/my/reservations` | 내 예매 목록 |
 | `/my/reservations/[id]` | 예매 상세 |
 
-`/performances/[id]/schedules/[scheduleId]/seats`(좌석 선택)는 Phase 6(Task 023)에서 추가됐다. 공연 상세에서 회차·등급·매수를 고르면 `?gradeId=&quantity=`를 달고 이 화면으로 이동하고, 여기서 좌석을 골라 선점한다. `/queue/[scheduleId]`(대기열, Phase 9)가 추가될 예정이다 — 백엔드 API는 Task 031에서 완성됐고 화면은 Task 032다.
+| `/performances/[id]/schedules/[scheduleId]/seats` | 좌석 선택 (Task 023) |
+| `/queue/[scheduleId]` | 대기열 (Task 032) |
+
+좌석 선택 화면은 Phase 6(Task 023)에서 추가됐다. 공연 상세에서 회차·등급·매수를 고르면 `?gradeId=&quantity=`를 달고 이 화면으로 이동하고, 여기서 좌석을 골라 선점한다.
+
+대기열 화면은 Phase 9(Task 032)에서 추가됐고 `?performanceId=&gradeId=&quantity=`를 받는다(좌석 화면으로 돌아갈 값들이다). **"좌석 선택" 버튼은 대기열이 아니라 좌석 화면을 가리킨다** — 대기열 API가 전부 로그인을 요구해서 버튼을 돌리면 대기열을 켜지 않은 회차에서도 로그인이 강제되고, 좌석 조회를 `permitAll`로 열어둔 결정이 무효가 된다. 대신 좌석 조회나 예매 선점이 `401`/`403`을 받을 때만 이 화면으로 우회한다. `queue_enabled=false`인 회차는 진입 API가 `DISABLED`를 돌려주므로 화면이 바로 좌석으로 넘긴다.
+
+프론트는 브라우저가 백엔드를 직접 부르지 않으므로(세션이 Next 도메인의 httpOnly 쿠키다) 폴링을 Next 쪽 route handler `GET /queue/[scheduleId]/status`로 중계한다. **`/api/` 아래가 아닌 이유**는 nginx가 그 접두사를 백엔드로 보내기 때문이다 — 거기 두면 로컬에서는 돌고 운영에서만 404가 난다.
 
 ## 부록 B: API (`/api/v1`)
 
