@@ -16,8 +16,34 @@ export const realErrors = new Rate('tikkit_real_errors');
 // 선점 성공률. 재고가 남아 있는데도 선점이 안 되면 경쟁이 과도한 것이다.
 export const holdSuccess = new Rate('tikkit_hold_success');
 
+// 대기열 입장권 거절률 (Task 033).
+//
+// QUEUE_EXPECTED를 켜면 403이 "진짜 에러"에서 빠지는데, 그렇다고 세지 않으면 안 된다 —
+// 입장권 없이 좌석을 찌른 403은 정상이고 **입장한 뒤에 받은 403은 버그인데, 둘이 같은
+// 상태코드·같은 ErrorCode로 온다.** 그래서 여기서 비율만 따로 남기고,
+// "ADMITTED 직후의 403"은 queue-spike.js가 check로 실패 처리한다.
+//
+// 이 값이 높은 것 자체는 정상이다. 대기열을 켠 회차에 줄을 안 서고 좌석을 요청하면
+// 전부 403이고, 그게 대기열이 일하고 있다는 뜻이다.
+export const queuePassDenied = new Rate('tikkit_queue_pass_denied');
+
+// 대기열 403을 "의도된 거절"로 받아들일지. **기본값이 꺼짐이고, 그게 중요하다.**
+//
+// 켜야 하는 이유: 대기열을 켠 군에서는 좌석 조회 403이 정상이다(QueuePassInterceptor와
+// ReservationService 가드가 의도적으로 던진다 — 409 SOLD_OUT과 같은 성격). 이게 없으면
+// tikkit_real_errors 임계값(rate<0.001)이 측정 시작 직후 터지고, 요청마다 console.error가
+// 찍혀서 k6 자체가 느려진다(측정 오염).
+//
+// **그런데 무조건 켜면 안 된다.** 대기열을 끈 군에서 403이 나오면 그건 플래그가 샌 것이고,
+// 무조건 허용하면 그 군이 초록색으로 조용히 통과한다 — 031이 QueueFlagRegistry에서 겪은
+// "켜지지 않은 환경에서 조용히 통과하는 테스트"와 같은 함정이다. 그래서 측정자가 군마다
+// "이 군은 403이 나와도 정상"이라고 선언하게 한다.
+//
+//   대기열 켠 군:  -e QUEUE_EXPECTED=1
+//   대기열 끈 군:  넘기지 않는다 (403이 나면 임계값이 터져야 한다)
+const QUEUE_EXPECTED = __ENV.QUEUE_EXPECTED === '1';
+
 // 정상적인 거절로 취급하는 (상태코드 -> ErrorCode) 목록.
-// 전부 ReservationService가 의도적으로 던지는 비즈니스 예외다.
 const EXPECTED_REJECTIONS = {
   409: [
     'SOLD_OUT', // 좌석 경쟁에서 밀렸다 (조건부 UPDATE가 0건을 반환)
@@ -61,10 +87,24 @@ export function classify(res, label) {
   const json = parse(res);
   const code = json && json.code ? json.code : null;
   const ok = res.status >= 200 && res.status < 300;
-  const expected = (EXPECTED_REJECTIONS[res.status] || []).indexOf(code) >= 0;
+  const listed = (EXPECTED_REJECTIONS[res.status] || []).indexOf(code) >= 0;
+  // 403은 QUEUE_EXPECTED를 켠 군에서만 의도된 거절이다 (위 주석 참조).
+  const queueRejection =
+    QUEUE_EXPECTED &&
+    res.status === 403 &&
+    (code === 'QUEUE_PASS_REQUIRED' || code === 'QUEUE_PASS_EXPIRED');
+  const expected = listed || queueRejection;
   const real = !ok && !expected;
 
   realErrors.add(real, { step: label });
+
+  // 403만 따로 센다 (위 queuePassDenied 주석 참조). 대기열이 꺼진 군에서는 0이어야 하고,
+  // 0이 아니면 플래그가 의도와 다르게 켜져 있다는 신호다.
+  if (res.status === 403) {
+    queuePassDenied.add(true, { step: label });
+  } else if (ok) {
+    queuePassDenied.add(false, { step: label });
+  }
 
   if (real) {
     // 진짜 에러는 0건이어야 하므로 로그가 넘칠 걱정이 없다. 나면 원인을 바로 봐야 한다.
@@ -111,6 +151,15 @@ export function apiGet(path, label) {
 
 export function apiPost(path, payload, label) {
   return request('POST', path, payload, label);
+}
+
+// 대기열 이탈(DELETE /queue/schedules/{id}/entries)에 필요하다.
+// request()는 처음부터 메서드를 받았는데 GET/POST만 export돼 있었다 — 이탈을 호출할 수가
+// 없었고, 그러면 입장권을 반납하지 못해 pass-ttl(15분) 동안 같은 계정이 계속 ADMITTED로
+// 돌아온다. 그 상태로 측정을 반복하면 2회차부터 대기열을 타지 않는다
+// (load-test/redis/reset-queue.sh가 같은 문제를 Redis 쪽에서 닫는다).
+export function apiDelete(path, label) {
+  return request('DELETE', path, null, label);
 }
 
 // 응답 바디에서 ApiResponse.data를 꺼낸다. 없으면 null.

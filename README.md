@@ -10,7 +10,7 @@
 
 **재고가 "수량 한 칸"에서 "좌석 N행"으로 바뀌었습니다.** Task 021~022에서 expand → backfill → contract 3단계 마이그레이션(`V4`~`V6`)을 끝냈습니다. 경쟁 대상이 한 행에서 여러 행으로 쪼개지면서 데드락과 부분 선점이라는 새 문제가 생겼는데, 정렬된 좌석 ID 기준 다중행 조건부 UPDATE와 데이터 변경 CTE로 **데드락 0건 / 부분 선점 0건**을 확인했습니다. `schedule_seats`의 HOT 업데이트 비율은 100%입니다. 과정과 수치는 [`004-seatmap-migration.md`](docs/improvements/004-seatmap-migration.md)에 있습니다.
 
-API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시켜 유지했기 때문에, 재고의 원천이 뒤집혔는데도 화면은 그대로였습니다. **Task 023(좌석 배치도 화면)** 에서 `posX`/`posY`로 SVG 배치도를 그려 사용자가 좌석을 직접 고르게 했고, 서버가 대신 앞자리를 집어주던 한시적 코드(`pickAvailableSeatIds`)가 사라졌습니다. **오픈런 트래픽은 좌석 API 앞에서 줄을 세웁니다.** Redis ZSET 두 개(`waiting`/`active`)로 입장을 제어하고, `active`의 score에 **입장권 만료 시각**을 넣어 검증을 `ZSCORE` 왕복 한 번, 일괄 수거를 `ZREMRANGEBYSCORE` 한 명령으로 끝냅니다. 별도 토큰을 발급하지 않습니다 — 같은 인증 세션에 내려줄 수밖에 없어서 보안 이득이 0이기 때문입니다. 대기 화면은 백엔드가 지시하는 간격으로 폴링합니다(`pollAfterSeconds` 2/5/10초) — 10만 명이 2초 고정으로 묻으면 상태 API 하나에 50,000 RPS가 몰려서, 좌석 API를 막아 번 여유를 상태 API가 전부 먹습니다. 회차별 `queue_enabled` 플래그로 켜고, 꺼져 있으면 기존 흐름이 그대로 동작합니다. 부하 수치 검증은 Task 033에서 k6로 합니다.
+API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시켜 유지했기 때문에, 재고의 원천이 뒤집혔는데도 화면은 그대로였습니다. **Task 023(좌석 배치도 화면)** 에서 `posX`/`posY`로 SVG 배치도를 그려 사용자가 좌석을 직접 고르게 했고, 서버가 대신 앞자리를 집어주던 한시적 코드(`pickAvailableSeatIds`)가 사라졌습니다. **오픈런 트래픽은 좌석 API 앞에서 줄을 세웁니다.** Redis ZSET 두 개(`waiting`/`active`)로 입장을 제어하고, `active`의 score에 **입장권 만료 시각**을 넣어 검증을 `ZSCORE` 왕복 한 번, 일괄 수거를 `ZREMRANGEBYSCORE` 한 명령으로 끝냅니다. 별도 토큰을 발급하지 않습니다 — 같은 인증 세션에 내려줄 수밖에 없어서 보안 이득이 0이기 때문입니다. 대기 화면은 백엔드가 지시하는 간격으로 폴링합니다(`pollAfterSeconds` 2/5/10/60초) — 10만 명이 2초 고정으로 묻으면 상태 API 하나에 50,000 RPS가 몰려서, 좌석 API를 막아 번 여유를 상태 API가 전부 먹습니다. 회차별 `queue_enabled` 플래그로 켜고, 꺼져 있으면 기존 흐름이 그대로 동작합니다. **Task 033에서 k6로 부하를 걸어 설정값을 도출했습니다** — 포화점 `R_sat`이 도착률 120/s(309 req/s)이고, 거기서 역산한 `admit-batch-size`의 유효 구간이 [6.7, 84]명/s입니다. 폴링은 3구간(2/5/10초)으로는 약 28,000명이 한계여서 60초 구간을 하나 더 넣었고, FE는 값이 계약으로 내려가므로 한 줄도 고치지 않았습니다.
 
 전체 계획은 [`docs/ROADMAP.md`](docs/ROADMAP.md)에서 확인할 수 있습니다.
 
@@ -260,23 +260,47 @@ docker exec tikkit-redis-prod redis-cli pttl 'tikkit:cache:performanceDetail::1'
 남긴 캐시는 **현 규모에서 p95를 개선하지 않습니다**(탐색 2.20 → 2.27ms). 측정 구간이 BE CPU
 4.2%의 저부하라 DB 작업을 줄인 효과가 원래 지연에 드러나지 않습니다. 채택 근거는 지연이 아니라
 **용량**(히트가 DB 왕복을 없앱니다)이고, 항목이 작아서 카탈로그가 커질수록 유리해지는 쪽입니다.
-검증은 Task 033 포화 테스트가 합니다.
+**Task 033에서 포화까지 올려 증명했습니다** — `browse`의 한계 처리량이 7,400 → **10,150 req/s(+37%)**,
+치우친 분포(`browse-skewed`)는 7,537 → 10,655 req/s(+41%)입니다. 적중률 99.9%이고 같은 VU에서
+p95도 같이 내려갑니다. 용량을 재지 못하던 구조적 이유는 부하 하네스의 think time이 iteration의
+99.8%를 차지했다는 것이었습니다([010](docs/improvements/010-waiting-queue.md) 8절).
 
 쿼리 카운트로 히트가 실제로 DB를 안 가는지 고정했습니다 — 공연 상세가 미스 2문장 / 히트
 **0문장**, 등급 조회가 미스 2 / 히트 **1문장**(잔여 수량 COUNT는 매번 셉니다).
 
 측정 상세와 기각 근거는 [008. 캐싱 적용](docs/improvements/008-caching.md)에 있습니다.
 
-## 포트폴리오 포인트 (예정)
+## 포트폴리오 포인트
 
-MVP 완성 이후 아래 항목을 순서대로 진행하며, 각 단계는 `docs/improvements/`에 **문제 → 재현 → 원인 분석 → 해결 → before/after 수치**로 기록할 예정입니다.
+각 단계를 `docs/improvements/`에 **문제 → 재현 → 원인 분석 → 해결 → before/after 수치**로
+기록했습니다. 전체 인덱스와 Task 대응 표는 [`docs/improvements/README.md`](docs/improvements/README.md)에 있습니다.
 
-- **동시성 제어 진화**: 의도적으로 동시성을 보장하지 않는 재고 차감으로 MVP를 출시한 뒤, 초과 판매를 테스트로 재현하고 DB 락 → Redis 분산 락 순으로 비교·개선
-- **지정석 전환**: 등급별 수량 모델 → 실제 좌석 모델로 무중단(expand → backfill → contract) 스키마 마이그레이션
-- **성능 최적화**: k6 부하 테스트로 병목을 찾고 인덱스·캐싱 전후 수치 비교
-- **대기열 시스템**: Redis 기반 대기열로 오픈런 트래픽 대응
+| 주제 | 수치 | 기록 |
+|---|---|---|
+| **동시성 제어 진화** | 초과 판매 100건 → **정확히 10매**. 분산 락은 정확성이 같고 6~7배 느려서 기각 | [001](docs/improvements/001-overselling-reproduction.md)·[002](docs/improvements/002-db-lock-comparison.md)·[003](docs/improvements/003-redis-distributed-lock.md) |
+| **지정석 무중단 전환** | 수량 재고 → 좌석 재고. expand → backfill → contract로 `schedule_seats` **6,026,894행** | [004](docs/improvements/004-seatmap-migration.md) |
+| **운영 기반** | 컨테이너화 · 모니터링 · BE 2대 세션 공유 | [004_2](docs/improvements/004_2-containerization.md)·[004_3](docs/improvements/004_3-monitoring.md)·[005](docs/improvements/005-session-scaling.md) |
+| **성능 최적화** | 쿼리 버퍼 **-88%**인데 지연은 그대로(요청당 고정비가 지배). 캐시는 포화에서 처리량 **+37%** | [006](docs/improvements/006-performance-baseline.md)·[007](docs/improvements/007-query-optimization.md)·[008](docs/improvements/008-caching.md) |
+| **FE 렌더링** | 전송량 **-77%**, FCP **-67%**. 좌석맵 구조 변경은 10,000석에서 RecalcStyle 71.84 → 29.20ms | [009](docs/improvements/009-frontend-performance.md)·[009_1](docs/improvements/009_1-frontend-performance-improvement.md)·[009_2](docs/improvements/009_2-seatmap-structure.md) |
+| **대기열 + 부하 검증** | 포화점 `R_sat` = 도착률 **120/s**(309 req/s). `admit-batch-size` 유효 구간 **[6.7, 84]명/s** 도출. 거절 경로의 DB 커넥션 **-98.3%** | [010](docs/improvements/010-waiting-queue.md) |
 
-자세한 내용은 [`docs/ROADMAP.md`](docs/ROADMAP.md)의 Phase 5~10을 참고하세요.
+### 이 프로젝트에서 반복해서 배운 것
+
+- **수치가 좋아지는 가장 흔한 이유는 요청이 일을 안 한 것이다.** 대기열을 켠 채로 예매 부하를
+  돌렸더니 좌석 조회가 전부 403이 되어 p95가 64 → 2.95ms로 "개선"됐습니다. 그래서 부하 하네스에
+  **워크로드 무결성 검사**(iteration당 요청 수·수신 바이트)를 넣었습니다 — 붕괴하면 지연이
+  좋아지므로 지연 임계값은 오히려 통과합니다.
+- **저부하 p95로 채택/기각하지 않는다.** 캐시를 "지연은 그대로지만 용량 때문에 채택"으로 남겼고,
+  포화까지 올려 +37%를 확인했습니다. 용량을 재지 못한 구조적 이유는 하네스의 think time이
+  iteration의 99.8%였다는 것입니다.
+- **측정 지점이 하나면 결론이 뒤집힌다.** 같은 좌석맵 변경이 2,000석에서는 회귀이고
+  10,000석에서는 개선이었습니다.
+- **반증된 설명을 주석에 남기지 않는다.** "커넥션 풀이 벽"과 "ETA가 `fixedDelay` 때문에
+  낙관적"을 둘 다 실측이 뒤집었고, 수치뿐 아니라 그 주석들을 같이 고쳤습니다.
+- **기각한 구현은 토글로도 남기지 않는다.** gzip, Redisson, 좌석 응답 축소를 코드째 지웠습니다.
+  검증되지 않은 코드가 남으면 다음 사람이 그게 유효한 선택지라고 읽습니다.
+
+진행 상황과 남은 작업은 [`docs/ROADMAP.md`](docs/ROADMAP.md)를 참고하세요.
 
 ## 동시성 제어: 초과 판매 차단 (해결됨)
 

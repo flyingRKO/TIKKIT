@@ -41,6 +41,45 @@ x-backend-env: &backend-env
   # 적중률 99.97%에서도 캐시를 켠 쪽이 느렸다 (docs/improvements/008-caching.md 4절).
   CACHE_TYPE: ${CACHE_TYPE:-none}
 
+  # 대기열 (Task 031). true면 RedisQueueGateway가 올라가 좌석 조회·예매 선점에 입장권을 요구한다.
+  #
+  # 기본값을 false로 둔다 — CACHE_TYPE과 같은 이유다. 대기열은 "유무에 따른 before/after"를
+  # 비교해서 효과를 판정하는 대상이라(Task 033), 스택을 띄우는 것만으로 켜지면 무방비 기준선을
+  # 다시 재기 어렵다. false면 DisabledQueueGateway가 전부 통과시킨다.
+  #
+  # 이 토글은 "대기열 기능이 애플리케이션에 있는가"이고, 실제로 줄을 세우는 회차는
+  # schedules.queue_enabled가 정한다 — 둘 다 켜져야 동작한다.
+  # 회차 플래그는 load-test/sql/04-enable-queue.sql로 켠다.
+  QUEUE_ENABLED: ${QUEUE_ENABLED:-false}
+
+  # Hikari 최대 커넥션 수 (Task 033에서 환경변수로 뺐다).
+  #
+  # ★ 왜 뺐는가 ★ application.yml에 Hikari 설정이 아예 없어서 **기본값 10**으로 돌고 있었고,
+  # A군 측정에서 도착률 140/s에 풀이 소진되며 커넥션 대기(pending)가 생겼다. 같은 지점에서
+  # 좌석 API p95가 64.5 -> 214.3ms로 꺾이니, "대기열이 좌석 API를 막아준다"는 결론 전에
+  # 풀을 늘리는 쪽이 더 싼 레버인지 확인해야 했다.
+  #
+  # ★ 확인 결과: 풀은 벽이 아니었다 ★ 10/20/30 모두 약 365 req/s에서 똑같이 막혔고,
+  # 140/s에서는 올린 쪽이 오히려 느렸다(p95 214 -> 280 -> 311ms). pending은 포화의 원인이
+  # 아니라 증상이었고, 실제 벽은 CPU다 — 240/s에서 16코어 중 11.4개를 쓴다.
+  # 그래서 이 변수는 기준선을 다시 재기 위한 측정용 손잡이로만 남는다.
+  #
+  # 상한은 Postgres의 max_connections(기본 100)다. BE가 2대라 한 대당 50을 넘기면 안 된다.
+  # 기본값 10은 Hikari 기본값과 같아서, 이 변수를 넣는 것만으로는 거동이 바뀌지 않는다.
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${DB_POOL_SIZE:-10}
+
+  # 한 틱에 입장시킬 인원과 틱 간격. Task 033이 포화점 측정으로 값을 정하는 대상이라
+  # 환경변수로 뺀다 — 군을 바꿀 때마다 이미지를 다시 빌드하지 않으려면 필요하다.
+  #
+  # 주의: QUEUE_ADMIT_INTERVAL을 1s에서 크게 바꾸면 QueueAdmissionScheduler의
+  # @SchedulerLock(lockAtLeastFor)도 같이 봐야 한다. 어노테이션에 계산식을 쓸 수 없어서
+  # 두 값이 수동으로 묶여 있고, 안 맞추면 "설정은 5초인데 실제로는 1초마다 입장"이 된다.
+  #
+  # 그리고 이 값은 혼자 움직이지 않는다 — 예상 대기시간이 rank / (batch-size / interval)이라
+  # 배치를 줄이면 화면의 ETA가 그만큼 길어진다.
+  QUEUE_ADMIT_BATCH_SIZE: ${QUEUE_ADMIT_BATCH_SIZE:-50}
+  QUEUE_ADMIT_INTERVAL: ${QUEUE_ADMIT_INTERVAL:-1s}
+
 x-backend-healthcheck: &backend-healthcheck
   # actuator 도입(Task 025)으로 도메인 엔드포인트 의존을 끊었다. /actuator/health는
   # DataSourceHealthIndicator를 포함하므로 UP이면 Hikari 커넥션과 Flyway 마이그레이션까지

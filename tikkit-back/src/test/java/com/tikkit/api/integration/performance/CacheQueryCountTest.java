@@ -120,6 +120,12 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
     @DisplayName("공연 목록은 첫 호출에 쿼리를 보내고 두 번째 호출은 0문장이다")
     void 공연_목록_히트는_0문장() {
         long miss = queryCounter.count(() -> performanceService.list(null, null, "ON_SALE", 0, listPageSize));
+        // ★ 캐시 쓰기가 보일 때까지 기다린다 ★
+        // AbstractRedisCacheContainerTest.awaitCached() Javadoc이 적어둔 그대로다 — 캐시 쓰기가
+        // 간헐적으로 늦게 보여서, 넣고 바로 꺼내면 두 번째 호출이 미스를 탄다. 기다리지 않으면
+        // 전체 스위트에서 **실행마다 다르게** 깨진다(Task 033에서 두 번 겪었다. 증상이
+        // "히트가 0문장이 아니다"뿐이라 원인이 안 보인다).
+        awaitCached(CacheNames.PERFORMANCE_LIST, listCacheKey());
         long hit = queryCounter.count(() -> performanceService.list(null, null, "ON_SALE", 0, listPageSize));
 
         assertThat(miss).isEqualTo(1);
@@ -141,6 +147,12 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
     @DisplayName("공연 상세는 첫 호출에 2문장, 두 번째 호출은 0문장이다")
     void 공연_상세_히트는_0문장() {
         long miss = queryCounter.count(() -> performanceService.getDetail(performanceId));
+        // ★ 캐시 쓰기가 보일 때까지 기다린다 ★
+        // AbstractRedisCacheContainerTest.awaitCached() Javadoc이 적어둔 그대로다 — 캐시 쓰기가
+        // 간헐적으로 늦게 보여서, 넣고 바로 꺼내면 두 번째 호출이 미스를 탄다. 기다리지 않으면
+        // 전체 스위트에서 **실행마다 다르게** 깨진다(Task 033에서 두 번 겪었다. 증상이
+        // "히트가 0문장이 아니다"뿐이라 원인이 안 보인다).
+        awaitCached(CacheNames.PERFORMANCE_DETAIL, performanceId);
         long hit = queryCounter.count(() -> performanceService.getDetail(performanceId));
 
         assertThat(miss).isEqualTo(2);
@@ -151,6 +163,12 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
     @DisplayName("등급 조회는 가격만 캐시하므로 두 번째 호출도 잔여 수량 COUNT 1문장은 남는다")
     void 등급_조회_히트는_1문장() {
         long miss = queryCounter.count(() -> scheduleService.getTicketGrades(scheduleId));
+        // ★ 캐시 쓰기가 보일 때까지 기다린다 ★
+        // AbstractRedisCacheContainerTest.awaitCached() Javadoc이 적어둔 그대로다 — 캐시 쓰기가
+        // 간헐적으로 늦게 보여서, 넣고 바로 꺼내면 두 번째 호출이 미스를 탄다. 기다리지 않으면
+        // 전체 스위트에서 **실행마다 다르게** 깨진다(Task 033에서 두 번 겪었다. 증상이
+        // "히트가 0문장이 아니다"뿐이라 원인이 안 보인다).
+        awaitCached(CacheNames.GRADE_PRICES, scheduleId);
         long hit = queryCounter.count(() -> scheduleService.getTicketGrades(scheduleId));
 
         // 미스: 등급 행 + COUNT. 히트: COUNT만.

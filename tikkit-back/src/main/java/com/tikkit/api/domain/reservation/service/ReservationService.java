@@ -7,7 +7,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import com.tikkit.api.domain.member.repository.MemberRepository;
 import com.tikkit.api.domain.payment.entity.Payment;
 import com.tikkit.api.domain.payment.gateway.PaymentGateway;
-import com.tikkit.api.domain.queue.service.QueueGateway;
 import com.tikkit.api.domain.payment.repository.PaymentRepository;
 import com.tikkit.api.domain.performance.entity.Schedule;
 import com.tikkit.api.domain.performance.entity.TicketGrade;
@@ -79,7 +78,6 @@ public class ReservationService {
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;
     private final MeterRegistry meterRegistry;
-    private final QueueGateway queueGateway;
 
     /**
      * 예매 카운터를 0으로 미리 등록한다.
@@ -121,21 +119,23 @@ public class ReservationService {
      */
     @Transactional
     public ReservationResponse create(Long memberId, ReservationCreateRequest request) {
-        // 대기열 입장권 검증 (Task 031).
+        // 대기열 입장권 검증은 **컨트롤러로 올렸다** (Task 033).
         //
-        // 인터셉터가 아니라 여기서 부르는 이유: scheduleId가 **요청 본문**에 있다. 인터셉터가
-        // 본문을 읽으면 @RequestBody 역직렬화가 빈 스트림을 만난다. AOP로 숨기지 않은 이유는
-        // 어노테이션 하나로는 "왜 403인지" 추적이 안 되고, Task 020이 지운 @DistributedLock AOP를
-        // 되살리는 셈이 되기 때문이다. 호출 흐름에 한 줄로 보이는 쪽이 낫다.
+        // 원래 이 메서드의 첫 줄에 있었다. 그런데 이 메서드가 @Transactional이라서
+        // **거절 한 건이 Hikari 커넥션 한 개를 잡고 나서 던진다.** SQL을 한 줄도 돌리지 않는데도
+        // 그렇다 — 트랜잭션 시작 시점에 커넥션을 획득하기 때문이다. 실측으로 확인했다:
+        // 전원이 403을 받는 60초 구간에서 hikaricp_connections_acquire_seconds_count 증가분이
+        // **요청당 1.01개**였다(docs/improvements/010-waiting-queue.md).
         //
-        // attempts 카운터 **밖에서** 부른다. 대기열 거절은 "예매 시도의 실패"가 아니라 시도에
-        // 도달하지 못한 것이다. 안에서 세면 예매 성공률이 대기열 거절로 오염되고, 거절 자체는
-        // tikkit.queue.pass.checks가 이미 세고 있어 중복이 된다.
+        // 대기열의 목적이 DB를 지키는 것인데 지키려던 자원을 거절이 그대로 소모하는 것이고,
+        // 오픈런에서는 거절이 요청의 대부분이라 작은 누수가 아니다.
         //
-        // 대기열이 꺼져 있거나 이 회차의 플래그가 false면 DisabledQueueGateway/플래그 검사가
-        // 즉시 통과시킨다 — Redis를 건드리지 않는다.
-        queueGateway.requireAdmitted(request.scheduleId(), memberId);
-
+        // 컨트롤러가 맞는 자리인 이유: 인터셉터를 못 쓴 이유는 scheduleId가 **요청 본문**에 있어서
+        // 인터셉터가 읽으면 @RequestBody 역직렬화가 빈 스트림을 만난다는 것이었는데, 컨트롤러에는
+        // 이미 역직렬화된 본문이 있다. 좌석 조회를 인터셉터가 막는 것과 같은 웹 계층이 된다.
+        //
+        // 대가: 서비스가 스스로를 보호하지 않으므로 **다른 호출부가 생기면 대기열을 우회한다.**
+        // 지금 호출부는 ReservationController 하나이고, 늘어나면 가드를 같이 옮겨야 한다.
         try {
             ReservationResponse response = createPending(memberId, request);
             attemptCounter(RESULT_SUCCESS, REASON_NONE).increment();

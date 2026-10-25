@@ -4,7 +4,9 @@ import { SharedArray } from 'k6/data';
 import { apiPost } from './api.js';
 
 // load-test/sql/03-loadtest-members.sql이 만든 계정 수와 맞춰야 한다.
-export const ACCOUNT_COUNT = Number(__ENV.ACCOUNT_COUNT || 500);
+// Task 033에서 500 -> 2,000으로 올렸다 — 포화점을 찾으려면 maxVUs 상한이 서버보다
+// 먼저 걸리면 안 된다(min(300, ACCOUNT_COUNT) 참조).
+export const ACCOUNT_COUNT = Number(__ENV.ACCOUNT_COUNT || 2000);
 
 const PASSWORD = 'Password1!';
 

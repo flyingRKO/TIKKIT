@@ -58,6 +58,11 @@ public class QueueAdmissionScheduler {
         Instant now = Instant.now();
         Set<Long> scheduleIds = flags.enabledScheduleIds();
         if (scheduleIds.isEmpty()) {
+            // Gauge를 0으로 내려놓고 나간다. 이 한 줄이 없으면 플래그를 끈 뒤에도
+            // tikkit.queue.waiting.size가 **마지막 값에 얼어붙는다** — Gauge는 AtomicLong을
+            // 읽을 뿐이고 아무도 그 값을 갱신하지 않기 때문이다. 대시보드에서는 "대기열이
+            // 아직 돌고 있다"로 보이고, 측정 군을 바꾼 직후에 그 오독이 일어난다.
+            metrics.updateWaitingSize(0);
             return;
         }
 
