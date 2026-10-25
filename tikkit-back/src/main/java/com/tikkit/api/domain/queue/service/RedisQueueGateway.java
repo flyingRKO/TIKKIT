@@ -26,20 +26,48 @@ public class RedisQueueGateway implements QueueGateway {
 
     /**
      * 폴링 백오프 구간. 순번이 뒤쪽일수록 느리게 묻는다.
-     * <p>
+     *
+     * <h2>왜 백오프가 필요한가</h2>
      * 10만 명이 2초 고정으로 폴링하면 상태 API 하나에 50,000 RPS가 몰린다 — 좌석 API를 막아서
-     * 번 여유를 상태 API가 전부 먹는 것이다. Redis는 버티지만({@code ZRANK} + {@code ZCARD})
-     * Tomcat 스레드와 nginx가 먼저 죽는다. 대부분이 뒤쪽이므로 이 구간만으로 약 10,000 RPS까지
-     * 떨어진다.
+     * 번 여유를 상태 API가 전부 먹는 것이다. Redis는 버티지만 Tomcat 스레드와 nginx가 먼저 죽는다.
+     *
+     * <h2>구간이 하나 부족했다 (Task 033 실측)</h2>
+     * 구간이 닫힌 식이라 "대기 N명일 때 필요한 RPS"가 계산된다.
+     * <pre>
+     *   RPS(N) = min(N,100)/2 + min(max(N-100,0),900)/5
+     *          + min(max(N-1000,0),9000)/10 + max(N-10000,0)/60
+     * </pre>
+     * 3구간(2/5/10초)이던 Task 031 설계는 <b>N=100,000에서 10,130 RPS</b>를 요구했다.
+     * 그런데 실측한 상태 API 처리량은 <b>2,986 req/s</b>(p95 3.63ms, 실패 0%)였고, 그 값으로
+     * 위 식을 역으로 풀면 3구간이 지탱하는 한계는 <b>약 28,000명</b>이다 — 목표 10만 명의 1/3이다.
      * <p>
-     * 숫자의 근거는 아직 없다. Task 033이 포화 테스트로 정한다 — 계약에 필드가 있으니
-     * 프론트를 고치지 않고 이 상수만 바꾸면 된다.
+     * 그래서 {@code rank >= 10,000}에 60초 구간을 더했다. 같은 식으로 N=100,000의 요구가
+     * <b>2,630 RPS</b>로 떨어져 실측값 안에 들어온다. 30초로 두면 4,130 RPS인데 그건 측정으로
+     * 증명되지 않은 영역이라, <b>증명된 쪽</b>을 골랐다.
+     * <p>
+     * 1,000~10,000을 10초로 남긴 이유는 체감이다. 입장 속도가 50~84명/s이므로 rank 10,000의
+     * 예상 대기가 119~200초인데, 그 사람에게 60초를 주면 남은 대기 동안 화면이 두세 번만 갱신된다.
+     * 60초는 예상 대기가 분 단위로 넘어가는 rank 10,000 이상에만 쓴다.
+     *
+     * <h2>깊이를 100배 늘려도 요청당 비용이 같았다</h2>
+     * 대기 1,000명과 100,000명에서 같은 도착률로 재면 상태 p95 비율이 0.95~1.03이다.
+     * {@code ZRANK}가 O(log N)이니 이론상 1.66배여야 하는데 보이지 않는다 — <b>순번 계산이
+     * 요청 비용에서 차지하는 몫이 측정 한계 아래</b>라는 뜻이고, 그래서 위 역산이 성립한다.
+     *
+     * <h2>2,986 req/s는 하한이다 — 서버 한계가 아니다</h2>
+     * 그 지점에서 BE CPU는 인스턴스당 210%였다(예매 포화 때는 414%였다). 호스트 16코어 중
+     * 합계 6.9코어를 썼고 postgres는 5.5%였다 — 상태 조회가 DB를 안 건드린다는 뜻이다.
+     * 더 올리면 <b>부하 생성기가 먼저 막혔다</b>: k6의 VU 상한을 600 → 2,000으로 올리자 처리량이
+     * 2,898 → 2,684 req/s로 <b>떨어졌다.</b> 즉 진짜 상한은 더 위에 있고 여기 적은 숫자는
+     * "이 호스트에서 증명된 범위"다. 전용 부하 노드가 있으면 60초를 당길 여지가 있다.
      */
     private static final long NEAR_FRONT_RANK = 100;
     private static final long MID_RANK = 1_000;
+    private static final long FAR_RANK = 10_000;
     private static final long POLL_NEAR_FRONT_SECONDS = 2;
     private static final long POLL_MID_SECONDS = 5;
     private static final long POLL_FAR_SECONDS = 10;
+    private static final long POLL_DEEP_SECONDS = 60;
 
     private final WaitingQueueRedisRepository repository;
     private final QueueFlagRegistry flags;
@@ -154,7 +182,10 @@ public class RedisQueueGateway implements QueueGateway {
         if (rank < MID_RANK) {
             return POLL_MID_SECONDS;
         }
-        return POLL_FAR_SECONDS;
+        if (rank < FAR_RANK) {
+            return POLL_FAR_SECONDS;
+        }
+        return POLL_DEEP_SECONDS;
     }
 
     /** 입장권 유효성. 만료 시각이 {@code now}와 같으면 만료로 본다(수거 기준과 일치). */

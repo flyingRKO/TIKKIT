@@ -1,14 +1,21 @@
 package com.tikkit.api.integration.queue;
 
+import com.tikkit.api.domain.queue.QueueKeys;
 import com.tikkit.api.domain.queue.dto.QueueState;
 import com.tikkit.api.domain.queue.dto.QueueStatusResponse;
 import com.tikkit.api.support.AbstractRedisQueueContainerTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.mock.web.MockHttpSession;
 
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -22,6 +29,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 이건 테스트의 한계가 아니라 <b>설계가 보장하지 않는 범위</b>다.
  */
 class QueueOrderingTest extends AbstractRedisQueueContainerTest {
+
+    // 합성 멤버를 한 번의 ZADD로 심기 위해서만 쓴다. 리포지토리를 거치면 왕복이 멤버 수만큼 생긴다.
+    @Autowired
+    private StringRedisTemplate redis;
 
     private long scheduleId;
     private List<MockHttpSession> sessions;
@@ -113,13 +124,68 @@ class QueueOrderingTest extends AbstractRedisQueueContainerTest {
     }
 
     @Test
-    @DisplayName("폴링 간격은 순번 구간에 따라 백엔드가 지시한다")
+    @DisplayName("폴링 간격은 순번 구간에 따라 백엔드가 지시한다 — 2/5/10/60초 네 구간")
     void 폴링_간격은_순번_구간에_따라_결정된다() {
-        // 픽스처가 5명이라 전원이 rank < 100 구간이다. 뒤쪽 구간은 ZSET에 직접 심어 확인한다.
-        long nearFront = memberIdOf(sessions.get(0));
-        queueGateway.enter(scheduleId, nearFront);
+        long member = memberIdOf(sessions.get(0));
 
-        assertThat(queueGateway.status(scheduleId, nearFront).pollAfterSeconds()).isEqualTo(2);
+        // 구간마다 대표값 하나만 보면 경계가 안 잡힌다. 조건이 전부 `<`이고 rank가 0-based라
+        // off-by-one 하나로 구간 하나가 통째로 밀리는데, 증상은 "N번째 사람만 폴링이 다르다"뿐이다.
+        // 그래서 경계 양쪽을 다 고정한다. 심는 비용은 경계 하나당 ZADD 왕복 1회다.
+
+        // 맨 앞. rank 0도 2초 구간에 든다(`rank < 100`).
+        assertThat(pollSecondsWithGhostsAhead(member, 0)).isEqualTo(2);
+
+        // 2초 ↔ 5초 경계. NEAR_FRONT_RANK = 100이므로 rank 99까지가 2초다.
+        assertThat(pollSecondsWithGhostsAhead(member, 99)).isEqualTo(2);
+        assertThat(pollSecondsWithGhostsAhead(member, 100)).isEqualTo(5);
+
+        // 5초 ↔ 10초 경계. MID_RANK = 1,000.
+        assertThat(pollSecondsWithGhostsAhead(member, 999)).isEqualTo(5);
+        assertThat(pollSecondsWithGhostsAhead(member, 1_000)).isEqualTo(10);
+
+        // 10초 ↔ 60초 경계. FAR_RANK = 10,000 — Task 033이 추가한 구간이라 회귀 위험이 가장 크다.
+        // 이 경계가 틀리면 대기 10만 명의 상태 API 부하가 2,630 RPS에서 10,130 RPS로 뛰는데,
+        // 저부하 테스트로는 아무 증상도 보이지 않는다.
+        assertThat(pollSecondsWithGhostsAhead(member, 9_999)).isEqualTo(10);
+        assertThat(pollSecondsWithGhostsAhead(member, 10_000)).isEqualTo(60);
+    }
+
+    /**
+     * 실제 회원을 원하는 순번에 놓고 그때의 {@code pollAfterSeconds}를 돌려준다.
+     *
+     * @param ghostsAhead 앞에 세울 합성 멤버 수. 이 값이 그 회원의 0-based rank가 된다
+     */
+    private long pollSecondsWithGhostsAhead(long memberId, int ghostsAhead) {
+        deleteQueue(scheduleId);
+        if (ghostsAhead > 0) {
+            seedGhostsAhead(scheduleId, ghostsAhead);
+        }
+        return queueGateway.enter(scheduleId, memberId).pollAfterSeconds();
+    }
+
+    /**
+     * 대기 ZSET에 합성 멤버를 심는다.
+     *
+     * <h2>{@code ZADD} 한 번으로 심는다</h2>
+     * {@code queueRepository.enqueue()}를 1만 번 부르면 Redis 왕복이 1만 번이라 테스트 하나가
+     * 수십 초로 늘어난다. 부하 테스트의 {@code load-test/redis/seed-waiting.sh}가 Lua로 묶는 것과
+     * 같은 이유이고, 같은 트릭을 쓰므로 테스트와 하네스가 같은 모양의 큐를 만든다.
+     *
+     * <h2>멤버 id를 1,000만부터 쓴다</h2>
+     * 실제 회원 id와 겹치면 {@code ZADD}가 그 회원의 score를 덮어 순번이 바뀐다. 그러면
+     * "앞에 N명을 세웠다"는 전제가 조용히 깨진다.
+     *
+     * <h2>score를 과거로 준다</h2>
+     * 합성 멤버가 실제 회원보다 <b>앞에</b> 서야 순번이 밀린다. 미래로 주면 뒤에 서고
+     * rank가 0이 되어, 어느 구간을 재든 전부 2초가 나온다.
+     */
+    private void seedGhostsAhead(long scheduleId, int count) {
+        long base = Instant.now().toEpochMilli() - 600_000L;
+        Set<ZSetOperations.TypedTuple<String>> ghosts = new HashSet<>();
+        for (int i = 1; i <= count; i++) {
+            ghosts.add(ZSetOperations.TypedTuple.of(String.valueOf(10_000_000L + i), (double) (base + i)));
+        }
+        redis.opsForZSet().add(QueueKeys.waiting(scheduleId), ghosts);
     }
 
     @Test
