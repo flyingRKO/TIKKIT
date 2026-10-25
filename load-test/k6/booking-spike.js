@@ -14,18 +14,15 @@
 //   docker compose -f docker-compose.prod.yml --profile load run --rm k6 \
 //     run -o experimental-prometheus-rw --summary-export=/results/booking-spike.json \
 //     /scripts/booking-spike.js
+//
+// 포화점 탐색(Task 033 A군) — 계단식으로 올려 p95가 꺾이는 도착률을 찾는다:
+//   ... run -e STAGE_PROFILE=breakpoint -e MAX_RATE=300 \
+//       --summary-export=/results/t033-a-breakpoint-1.json /scripts/booking-spike.js
 import { check } from 'k6';
 import { apiGet, apiPost, data, holdSuccess } from './lib/api.js';
 import { ensureLogin, ACCOUNT_COUNT } from './lib/accounts.js';
-import { collectScheduleIds, groupAvailableByGrade } from './lib/catalog.js';
-import {
-  BASE_THRESHOLDS,
-  DURATION,
-  RAMP_DOWN,
-  RAMP_UP,
-  SYSTEM_TAGS,
-  pick,
-} from './lib/config.js';
+import { collectScheduleIds, groupAvailableByGrade, seatCount } from './lib/catalog.js';
+import { SYSTEM_TAGS, arrivalStages, pick, thresholdsFor } from './lib/config.js';
 
 // 초당 도착 수. 004_3에서 curl + xargs로 측정한 최대 처리량이 81.9 req/s였으므로
 // 그 근처를 기본 피크로 둔다. 한 iteration이 요청 3~4개를 보내니 실제 RPS는 이보다 높다.
@@ -41,6 +38,16 @@ const PAY_RATIO = Number(__ENV.PAY_RATIO || 0.7);
 // 좌석 선택 전략: 'random'(기본, 기준선용) | 'head'(경쟁 재현용). 아래 사용처 주석 참조.
 const SEAT_STRATEGY = __ENV.SEAT_STRATEGY || 'random';
 
+// VU 풀 상한. Task 033에서 환경변수로 뺐다.
+//
+// 기본값을 계정 수(2,000)까지 올리지 않은 이유: k6의 VU는 하나당 수 MB를 먹어서 1,000개를
+// 미리 할당하면 로컬 호스트에서 부하 생성기가 서버보다 먼저 죽는다.
+//
+// **dropped_iterations가 0이 아니면 이 값이 병목이다.** 그건 서버 거동이 아니라 부하
+// 생성기의 한계라서, 그 상태의 p95는 "서버가 버틴 결과"가 아니다. 그때는 MAX_VUS를 올려
+// 다시 잰다 (계정 수를 넘기면 안 된다 — lib/accounts.js 참조).
+const MAX_VUS = Number(__ENV.MAX_VUS || 300);
+
 export const options = {
   scenarios: {
     spike: {
@@ -50,15 +57,12 @@ export const options = {
       // VU 풀 크기. 서버가 느려지면 한 iteration이 길어져 더 많은 VU가 필요하다.
       // maxVUs를 계정 수 이하로 둬야 계정이 겹치지 않는다 (lib/accounts.js 참조).
       preAllocatedVUs: 50,
-      maxVUs: Math.min(300, ACCOUNT_COUNT),
-      stages: [
-        { duration: RAMP_UP, target: PEAK_RATE },
-        { duration: DURATION, target: PEAK_RATE },
-        { duration: RAMP_DOWN, target: 0 },
-      ],
+      maxVUs: Math.min(MAX_VUS, ACCOUNT_COUNT),
+      // STAGE_PROFILE=spike(기본)면 기존 거동, breakpoint면 계단식 상승 (lib/config.js).
+      stages: arrivalStages(PEAK_RATE),
     },
   },
-  thresholds: BASE_THRESHOLDS,
+  thresholds: thresholdsFor(),
   // url 라벨을 빼서 Prometheus 카디널리티를 막는다 (lib/config.js 주석 참조)
   systemTags: SYSTEM_TAGS,
   summaryTrendStats: ['min', 'avg', 'med', 'p(95)', 'p(99)', 'max'],
@@ -78,7 +82,7 @@ export default function (setupData) {
   const scheduleId = pick(setupData.scheduleIds);
   const seatRes = apiGet(`/schedules/${scheduleId}/seats`, 'seatmap');
   const seats = data(seatRes);
-  if (!seats || seats.length === 0) {
+  if (seatCount(seats) === 0) {
     return;
   }
 

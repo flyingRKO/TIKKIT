@@ -18,7 +18,30 @@ import { API } from './config.js';
 // keyword는 title containsIgnoreCase라서 '[LOAD] 부하테스트 공연 NNNN'만 걸린다.
 const KEYWORD = __ENV.CATALOG_KEYWORD || '부하테스트';
 
+// 회차 id를 직접 지정하는 경로 (Task 033).
+//
+// 대기열 측정에서는 API로 긁어오면 안 된다 — 목록에는 ON_SALE 회차가 3,000개 들어 있고
+// queue_enabled가 켜진 것은 그중 10개뿐이다. 긁어온 60개를 쓰면 대부분이 DISABLED를 받아
+// 대기열을 거치지 않고 통과하고, **"대기열 켠 군"과 "안 켠 군"이 한 측정에 섞인다.**
+// 04-enable-queue.sql이 마지막에 찍는 id 목록을 그대로 넘긴다.
+const EXPLICIT_IDS = __ENV.SCHEDULE_IDS || '';
+
 export function collectScheduleIds(sampleSize) {
+  if (EXPLICIT_IDS) {
+    const ids = EXPLICIT_IDS.split(',')
+      .map(function (v) {
+        return Number(v.trim());
+      })
+      .filter(function (v) {
+        return v > 0;
+      });
+    if (ids.length === 0) {
+      throw new Error(`SCHEDULE_IDS를 파싱하지 못했다: '${EXPLICIT_IDS}'`);
+    }
+    console.log(`setup: SCHEDULE_IDS로 지정된 회차 ${ids.length}개를 쓴다`);
+    return ids;
+  }
+
   const target = sampleSize || Number(__ENV.SAMPLE_SCHEDULES || 60);
   const scheduleIds = [];
 
@@ -63,6 +86,11 @@ export function collectScheduleIds(sampleSize) {
   }
   console.log(`setup: 회차 ${scheduleIds.length}개를 측정 대상으로 잡았다`);
   return scheduleIds;
+}
+
+// 좌석맵 응답의 좌석 수. 응답이 null일 수 있어서 호출부마다 가드를 두지 않도록 묶었다.
+export function seatCount(seats) {
+  return seats ? seats.length : 0;
 }
 
 // 좌석맵 응답에서 AVAILABLE 좌석을 등급별로 묶는다.
