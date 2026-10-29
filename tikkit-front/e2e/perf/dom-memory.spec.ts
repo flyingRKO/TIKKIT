@@ -125,6 +125,21 @@ test.describe("좌석맵 DOM·메모리", () => {
     );
     const selected = await readMetrics();
 
+    // 선택 표시 레이어는 선택이 있어야 생긴다. 위 구조 분해는 클릭 전에 재기 때문에
+    // 선택 상태에서만 보이는 rect는 여기서 따로 센다 (Task 035).
+    //
+    // rect 전체를 다시 세는 이유: 선택 표시를 별도 오버레이로 빼면 그 rect가
+    // document.querySelectorAll("rect")에 섞여 들어온다. 어느 몫이 오버레이인지 가려두지
+    // 않으면 "rect가 늘었다"가 회귀로 읽힌다.
+    const selectedStructure = await page.evaluate(() => {
+      const svg = document.querySelector('svg[role="group"]');
+      const overlay = svg?.querySelector('[data-layer="selection-overlay"]') ?? null;
+      return {
+        rectTotal: document.querySelectorAll("rect").length,
+        rectOverlay: overlay?.querySelectorAll("rect").length ?? 0,
+      };
+    });
+
     const perSeat = (value: number) => round(value / seatTotal, 3);
 
     printTable("DOM·메모리 (좌석 " + seatTotal.toLocaleString() + "석)", [
@@ -186,6 +201,14 @@ test.describe("좌석맵 DOM·메모리", () => {
         항목: "정적 좌석 귀속 합계",
         개수: (structure.rectStatic + structure.pathSubpaths).toLocaleString(),
         비고: `좌석 총수 ${seatTotal.toLocaleString()} - 선택 가능 ${structure.rectSelectable.toLocaleString()} = ${(seatTotal - structure.rectSelectable).toLocaleString()}과 맞아야 한다`,
+      },
+      {
+        항목: `선택 표시 rect (${target.quantity}매 선택 후)`,
+        개수: selectedStructure.rectOverlay.toLocaleString(),
+        비고:
+          selectedStructure.rectOverlay === 0
+            ? "별도 레이어 없음 — 좌석 rect 자체가 선택 표시를 들고 있다"
+            : `rect 전체 ${structure.rectTotal.toLocaleString()} → ${selectedStructure.rectTotal.toLocaleString()} 중 이 몫이 오버레이다`,
       },
     ]);
 
