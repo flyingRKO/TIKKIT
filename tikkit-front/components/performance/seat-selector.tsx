@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useCallback, useMemo, useReducer, useState } from "react";
 import { FormError } from "@/components/layout/form-error";
 import { StickyCta } from "@/components/layout/sticky-cta";
 import { GRADE_FILL, SeatMap } from "@/components/performance/seat-map";
@@ -21,6 +21,55 @@ const ZOOM_LEVELS = [
 
 /** 기본값은 "보통". 전체 보기는 돔 기준 좌석이 8px이라 손가락으로 못 누른다. */
 const DEFAULT_ZOOM = 1;
+
+/**
+ * 좌석 선택 상태. 고른 좌석과 안내 문구를 **한 덩어리로 묶는다** (Task 035).
+ *
+ * 왜 따로 두지 않는가: 상한 초과 판정이 "지금 몇 석을 골랐는지"에 달려 있는데, `useState`의
+ * 함수형 업데이트 안에서는 안내 문구를 띄울 수 없다(업데이터는 순수해야 하고 StrictMode에서
+ * 두 번 돌 수 있다). 그래서 전에는 핸들러가 클로저로 `selectedSeatIds`를 읽었고, 그 때문에
+ * **핸들러 참조가 매 렌더 새것이 되어 좌석 레이어의 memo가 전부 무효화됐다.**
+ *
+ * reducer로 합치면 `dispatch`가 영구히 같은 참조라서 핸들러를 고정할 수 있다.
+ */
+interface SeatSelectionState {
+  ids: number[];
+  notice: string | null;
+}
+
+type SeatSelectionAction =
+  | { type: "toggle"; seatId: number; quantity: number }
+  | { type: "reset" };
+
+function seatSelectionReducer(
+  state: SeatSelectionState,
+  action: SeatSelectionAction
+): SeatSelectionState {
+  switch (action.type) {
+    case "toggle": {
+      if (state.ids.includes(action.seatId)) {
+        return { ids: state.ids.filter((id) => id !== action.seatId), notice: null };
+      }
+      // 매수가 찬 뒤 다른 좌석을 누르면 **무시하고 안내**한다.
+      //
+      // 가장 먼저 고른 좌석을 밀어내는 방식도 있는데, 예매에서는 위험하다 — 누른 적 없는
+      // 자리가 조용히 풀리고, 사용자는 그걸 눈치채지 못한 채 결제로 넘어간다.
+      if (state.ids.length >= action.quantity) {
+        return {
+          ...state,
+          notice: `${action.quantity}석까지 고를 수 있습니다. 바꾸려면 고른 좌석을 먼저 해제해주세요.`,
+        };
+      }
+      return { ids: [...state.ids, action.seatId], notice: null };
+    }
+    case "reset":
+      // 이미 비어 있으면 같은 객체를 돌려준다. 렌더 중 dispatch를 쓰는 자리가 있어서
+      // (아래 선점 실패 처리) 가드가 망가져도 무한 루프로 가지 않게 하는 이중 안전장치다.
+      return state.ids.length === 0 && state.notice === null ? state : { ids: [], notice: null };
+  }
+}
+
+const INITIAL_SEAT_SELECTION: SeatSelectionState = { ids: [], notice: null };
 
 interface SeatSelectorProps {
   performanceId: number;
@@ -48,8 +97,9 @@ export function SeatSelector({
   quantity,
   bookable,
 }: SeatSelectorProps) {
-  const [selectedSeatIds, setSelectedSeatIds] = useState<number[]>([]);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [selection, dispatchSelection] = useReducer(seatSelectionReducer, INITIAL_SEAT_SELECTION);
+  const selectedSeatIds = selection.ids;
+  const notice = selection.notice;
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM);
   const [state, formAction, pending] = useActionState(
     createReservationAction,
@@ -87,29 +137,20 @@ export function SeatSelector({
   const [handledResetAt, setHandledResetAt] = useState<number | undefined>(undefined);
   if (state.resetSeatsAt !== undefined && state.resetSeatsAt !== handledResetAt) {
     setHandledResetAt(state.resetSeatsAt);
-    setSelectedSeatIds([]);
-    setNotice(null);
+    dispatchSelection({ type: "reset" });
   }
 
   /**
-   * 매수가 찬 뒤 다른 좌석을 누르면 **무시하고 안내**한다.
+   * 좌석 토글. 판정 자체는 `seatSelectionReducer`가 한다.
    *
-   * 가장 먼저 고른 좌석을 밀어내는 방식도 있는데, 예매에서는 위험하다 — 누른 적 없는 자리가
-   * 조용히 풀리고, 사용자는 그걸 눈치채지 못한 채 결제로 넘어간다.
+   * `quantity`는 URL 쿼리에서 온 prop이라 이 화면에 머무는 동안 안 바뀌고 `dispatch`는 영구
+   * 안정이므로, 이 핸들러가 사실상 고정 참조가 된다. 좌석 레이어의 memo가 실제로 먹기 위한
+   * 선행 조건이다 — 핸들러 하나가 새 참조면 좌석 수천 개의 memo가 전부 무효화된다.
    */
-  function handleToggleSeat(seatId: number) {
-    if (selectedSeatIds.includes(seatId)) {
-      setSelectedSeatIds((ids) => ids.filter((id) => id !== seatId));
-      setNotice(null);
-      return;
-    }
-    if (selectedSeatIds.length >= quantity) {
-      setNotice(`${quantity}석까지 고를 수 있습니다. 바꾸려면 고른 좌석을 먼저 해제해주세요.`);
-      return;
-    }
-    setSelectedSeatIds((ids) => [...ids, seatId]);
-    setNotice(null);
-  }
+  const handleToggleSeat = useCallback(
+    (seatId: number) => dispatchSelection({ type: "toggle", seatId, quantity }),
+    [quantity]
+  );
 
   const zoom = ZOOM_LEVELS[zoomIndex];
   const filled = selectedSeatIds.length === quantity;
