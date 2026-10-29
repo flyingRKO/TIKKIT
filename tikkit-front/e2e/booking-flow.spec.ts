@@ -60,6 +60,21 @@ test("가입 → 로그인 → 좌석 선택 → 선점 → 결제 → 취소 �
     const submit = page.getByRole("button", { name: /골라주세요|예매하기/ });
     await expect(submit).toBeDisabled();
 
+    // 키보드 경로(roving tabindex + 화살표 + Enter)도 같이 확인한다.
+    //
+    // Task 035가 좌석 레이어의 선택·포커스 처리를 통째로 다시 쓴다. 마우스 클릭 한 번만
+    // 보는 그물로는 "탭 스톱이 하나인지", "화살표로 옮겨지는지"가 조용히 깨진 걸 못 잡는다.
+    const seats = page.getByRole("checkbox");
+    await seats.first().focus();
+    await expect(seats.first()).toHaveAttribute("tabindex", "0");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await expect(seats.nth(1)).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByText("선택한 좌석 1/1")).toBeVisible();
+    // 이 흐름은 매수가 1매라 다른 좌석을 고르려면 먼저 풀어야 한다
+    await page.keyboard.press("Enter");
+    await expect(seats.nth(1)).toHaveAttribute("aria-checked", "false");
+
     // 배치도에서 고를 수 있는 좌석은 role="checkbox"다
     await page.getByRole("checkbox").first().click();
     await expect(page.getByText("선택한 좌석 1/1")).toBeVisible();
