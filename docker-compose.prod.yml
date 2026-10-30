@@ -104,6 +104,19 @@ services:
   postgres:
     image: postgres:15
     container_name: tikkit-postgres-prod
+    # Task 040의 측정 축이다. 기본값은 postgres:15 이미지와 같은 128MB로 둔다 — 이 Task는
+    # "올리면 좋아지는가"를 재는 것이고, 재기 전에 올려두면 before가 사라진다.
+    #
+    # shared_buffers는 CONFIG SET으로 못 바꾼다(재시작 필요). 그래서 환경변수로 뺐다.
+    # track_io_timing은 pg_stat_database.blk_read_time을 쓰려면 켜야 한다 — 읽은 페이지 수와
+    # 읽기에 쓴 시간은 다른 값이고, 007이 "버퍼 접근 수는 I/O의 대리지표가 아니다"로
+    # 한 번 속은 자리라 시간 쪽을 직접 본다.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}
+      - -c
+      - track_io_timing=on
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
