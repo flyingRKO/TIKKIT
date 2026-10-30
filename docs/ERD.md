@@ -245,6 +245,10 @@ WHERE id IN (SELECT schedule_seat_id FROM reservation_seats WHERE reservation_id
 
 같은 측정에서 `schedule_seats`의 HOT 비율이 **100.0%**(3회 모두, 선점·확정·취소 약 15,500건 UPDATE)로 확인됐다 — Task 022의 "표본 6건" 한계가 닫혔다. `fillfactor = 90` + "인덱스를 걸지 않는다"가 데이터를 26,894행에서 600만 행으로 늘려도 유지된다.
 
+**Task 040 재판정 — 기각에서 "지금 규모에서"라는 조건을 뗐다.** Task 028의 기각이 "작업 집합이 `shared_buffers` 128MB 안에 들어온다"는 전제에 기대고 있었으므로, 하네스가 도는 회차를 60개(약 20MB) → **600개(183MB)**로 늘려 그 전제를 깨고 포화 구간에서 다시 쟀다. 결과가 같다 — 커버링 인덱스는 요청당 버퍼 접근을 **1,409 → 189회(-86.6%)**로 줄이지만 **디스크 읽기는 9.8 → 12.7페이지로 늘고**(338MB 인덱스가 같은 `shared_buffers`를 힙과 다툰다. `hit_pct` 99.31% → 93.69%), 포화 처리량 **+3.1%는 같은 조건 9회 산포(736~796 req/s) 안**이다. cold 단일 쿼리에서도 `read` 194 vs 200으로 **인덱스 쪽이 6페이지 더 읽는다**(028의 196 vs 198을 방향까지 재현). `V7`은 계속 비워 둔다.
+
+**같이 기각한 것이 `shared_buffers` 상향이다.** 600회차에서 디스크 읽기를 요청당 9.8페이지로 만든 뒤 512MB·1GB로 올려 **0으로 되돌렸는데 처리량이 775 → 768 → 766 req/s로 안 움직였다.** 포화 구간 CPU가 **postgres 400%(4.0코어) vs BE 2대 합계 271%**라 벽이 I/O가 아니기 때문이다 — 그 4코어는 2,000행 튜플 구성과 237KB 전송에 들어간다. 그래서 좌석맵을 더 빠르게 하려면 줄여야 하는 것은 버퍼 접근도 I/O도 아니라 **Postgres CPU**이고, 그게 Task 036의 과녁이다. 상세는 `docs/improvements/012-shared-buffers-retrial.md`.
+
 **`idx(reservation_id)`도 기각했다.** 예약 100건 물리 삭제가 **26,906 ms → 2.71 ms**(약 9,900배)로 빨라지지만, HOT 비율이 **100% → 34%**로 떨어지고 예매 p95가 **+9.5%**(7.77 → 8.50 ms) 느려진다. 34%가 0이 아닌 이유는 좌석을 바꾸는 UPDATE 셋 중 `markSold`만 `reservation_id`를 건드리지 않아 HOT으로 남기 때문이다. **운영에서 예약을 물리 삭제하지 않는다** — 예약 상태 머신에 물리 삭제가 없고(`CANCELLED`/`EXPIRED`로 남긴다), 좌석 반환은 위 쿼리처럼 `reservation_seats`를 경유한다. 측정 상세는 `docs/improvements/007-query-optimization.md` 4.9절.
 
 **등급 혼합 정책**: "한 예약 = 한 등급"을 Phase 6 이후에도 유지한다. `reservations.ticket_grade_id`/`unit_price`/`quantity`는 제거하지 않고 그대로 쓰며, 예매 API에 `seatIds`가 추가된다. 선택한 모든 좌석이 동일한 `ticket_grade_id`에 속하는지는 여러 테이블에 걸친 조건이라 DB CHECK로 표현할 수 없으므로, 서비스 레이어에서 애플리케이션 검증으로 강제한다(Task 022).
@@ -349,5 +353,5 @@ CANCELLED, EXPIRED로 전이될 때 재고(MVP: `remaining_quantity`, 지정석 
 | V5_1 | 개발용 배치도 시드 — 좌표 보정·구역명·상태 샘플 (db/seed, dev 전용) | 021 |
 | V6 | `ticket_grades`의 수량 컬럼 제거 (contract) | 022 |
 | V6_1 | `shedlock` 테이블 생성 (다중 인스턴스 배치 중복 실행 방지) | 026 |
-| V7 | ~~조회 성능 개선을 위한 인덱스 추가~~ — **측정 결과 근거가 없어 만들지 않았다** (2절, 007 문서). 번호는 비워 둔다 | 028 |
+| V7 | ~~조회 성능 개선을 위한 인덱스 추가~~ — **측정 결과 근거가 없어 만들지 않았다** (2절, 007 문서). **Task 040이 작업 집합을 `shared_buffers` 밖으로 밀어 포화 구간에서 재판정했고 같은 결론이다**(012 문서). 번호는 계속 비워 둔다 | 028, 040 |
 | V8 | 대기열 활성화 플래그 (`schedules.queue_enabled` boolean NOT NULL DEFAULT false). 별도 테이블로 두지 않은 이유: 입장 속도·입장권 TTL은 전역 프로퍼티라 회차별로 보관할 설정이 이 boolean 하나뿐이다 | 031 |
