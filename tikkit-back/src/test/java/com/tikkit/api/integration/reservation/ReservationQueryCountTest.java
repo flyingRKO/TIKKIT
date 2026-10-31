@@ -6,10 +6,12 @@ import com.tikkit.api.domain.member.repository.MemberRepository;
 import com.tikkit.api.domain.reservation.dto.ReservationCreateRequest;
 import com.tikkit.api.domain.reservation.service.ReservationService;
 import com.tikkit.api.support.AbstractConcurrencyTest;
+import com.tikkit.api.support.QueryCountReport;
 import com.tikkit.api.support.QueryCounter;
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -24,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 줄이는 것이 그대로 효과가 된다. 베이스 클래스를 고른 이유는
  * {@link com.tikkit.api.integration.performance.PerformanceQueryCountTest}와 같다.
  */
+@Tag("query-count")
 class ReservationQueryCountTest extends AbstractConcurrencyTest {
 
     @Autowired
@@ -54,6 +57,7 @@ class ReservationQueryCountTest extends AbstractConcurrencyTest {
     @DisplayName("예매 선점은 좌석 수와 무관하게 6문장을 보낸다")
     void 예매_선점_6문장() {
         long queries = queryCounter.count(() -> reservationService.create(memberId, request(fixture, 2)));
+        QueryCountReport.record("POST /reservations (2석)", queries);
 
         // 등급+회차 fetch join / 중복 선점 확인 / 좌석 소속 확인 / 예약번호 nextval /
         // 예약 INSERT / 좌석 선점 CTE = 6.
@@ -71,6 +75,8 @@ class ReservationQueryCountTest extends AbstractConcurrencyTest {
 
         long oneSeat = queryCounter.count(() -> reservationService.create(memberId, request(fixture, 1)));
         long fourSeats = queryCounter.count(() -> reservationService.create(memberId, request(other, 4)));
+        QueryCountReport.record("POST /reservations (1석)", oneSeat);
+        QueryCountReport.record("POST /reservations (4석)", fourSeats);
 
         // 좌석마다 문장이 늘어나면 선점을 루프로 돌린 것이다. holdSeats는 CTE 한 방이어야 한다.
         assertThat(oneSeat).isEqualTo(fourSeats);
@@ -82,6 +88,7 @@ class ReservationQueryCountTest extends AbstractConcurrencyTest {
         reservationService.create(memberId, request(fixture, 2));
 
         long queries = queryCounter.count(() -> reservationService.getMyReservations(memberId, null, 0, 20));
+        QueryCountReport.record("GET /reservations (size 20)", queries);
 
         // 응답에 공연 제목·회차 시각·등급이 들어가지만 DTO 프로젝션이 조인으로 한 번에 뽑는다.
         // count는 PageableExecutionUtils가 생략한다 (첫 페이지가 꽉 차지 않았다).
@@ -94,6 +101,7 @@ class ReservationQueryCountTest extends AbstractConcurrencyTest {
         reservationService.create(memberId, request(fixture, 2));
 
         long queries = queryCounter.count(() -> reservationService.getMyReservations(memberId, null, 0, 1));
+        QueryCountReport.record("GET /reservations (size 1)", queries);
 
         assertThat(queries).isEqualTo(2);
     }
@@ -104,6 +112,7 @@ class ReservationQueryCountTest extends AbstractConcurrencyTest {
         Long reservationId = reservationService.create(memberId, request(fixture, 2)).id();
 
         long queries = queryCounter.count(() -> reservationService.getMyReservation(memberId, reservationId));
+        QueryCountReport.record("GET /reservations/{id}", queries);
 
         // 본문은 schedule/performance/ticketGrade를 fetch join으로 한 번에 받고,
         // 결제(없으면 null)와 좌석 목록이 각각 1문장이다.

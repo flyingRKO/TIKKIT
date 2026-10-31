@@ -3,10 +3,12 @@ package com.tikkit.api.integration.performance;
 import com.tikkit.api.domain.performance.service.PerformanceService;
 import com.tikkit.api.domain.performance.service.ScheduleService;
 import com.tikkit.api.support.AbstractConcurrencyTest;
+import com.tikkit.api.support.QueryCountReport;
 import com.tikkit.api.support.QueryCounter;
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -29,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code CacheQueryCountTest}가 Redis 컨테이너를 띄워 미스 경로와 히트 경로를 따로 고정한다.
  * 두 테스트를 나눈 이유는 프로퍼티가 달라 스프링 컨텍스트가 어차피 분리되기 때문이다.
  */
+@Tag("query-count")
 class PerformanceQueryCountTest extends AbstractConcurrencyTest {
 
     @Autowired
@@ -57,6 +60,7 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
         // PageableExecutionUtils.getPage는 offset 0이고 content가 페이지 크기보다 작으면
         // 전체 건수를 content 크기로 확정할 수 있어 count 쿼리를 쏘지 않는다.
         long queries = queryCounter.count(() -> performanceService.list(null, null, "ON_SALE", 0, 20));
+        QueryCountReport.record("GET /performances (size 20)", queries);
 
         assertThat(queries).isEqualTo(1);
     }
@@ -66,6 +70,7 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
     void 공연_목록_2문장() {
         // 페이지 크기를 1로 줄여 content가 페이지를 채우게 만든다 — 그래야 count가 실제로 나간다.
         long queries = queryCounter.count(() -> performanceService.list(null, null, "ON_SALE", 0, 1));
+        QueryCountReport.record("GET /performances (size 1)", queries);
 
         assertThat(queries).isEqualTo(2);
     }
@@ -74,6 +79,7 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
     @DisplayName("공연 상세 조회는 공연장 fetch join 1문장과 회차 목록 1문장을 보낸다")
     void 공연_상세_2문장() {
         long queries = queryCounter.count(() -> performanceService.getDetail(performanceId));
+        QueryCountReport.record("GET /performances/{id}", queries);
 
         // venue.getName()/getAddress()를 읽지만 findByIdWithVenue가 fetch join해 둬서 추가 쿼리가 없다.
         assertThat(queries).isEqualTo(2);
@@ -83,6 +89,7 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
     @DisplayName("등급 조회는 등급 행·잔여 좌석 COUNT 2문장을 보낸다 — 존재 확인이 빠졌다 (Task 029)")
     void 등급_조회_2문장() {
         long queries = queryCounter.count(() -> scheduleService.getTicketGrades(scheduleId));
+        QueryCountReport.record("GET /schedules/{id}/ticket-grades", queries);
 
         // Task 028까지는 3문장이었다(existsById + 등급 + COUNT). Task 029에서 등급을 먼저 조회하고
         // 결과가 비었을 때만 existsById로 404를 가르도록 뒤집어서, 정상 경로의 왕복이 하나 줄었다.
@@ -94,6 +101,7 @@ class PerformanceQueryCountTest extends AbstractConcurrencyTest {
     @DisplayName("좌석맵 조회는 좌석 수와 무관하게 회차 존재 확인·좌석 2문장을 보낸다")
     void 좌석맵_2문장() {
         long queries = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
+        QueryCountReport.record("GET /schedules/{id}/seats", queries);
 
         // 좌석이 10석이든 2,000석이든 문장 수는 같아야 한다 — 늘어나면 좌석마다 seat를 당겨 쓴 것이다.
         //
