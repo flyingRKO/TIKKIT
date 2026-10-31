@@ -74,10 +74,14 @@ jobs:
         run: |
           # 컴파일 단계에서 깨지면 표가 아예 없다. 그때 cat이 실패하면 진짜 원인이 가려지므로
           # 없다는 사실만 적고 넘긴다 — 잡은 어차피 Run query count gate에서 실패해 있다.
+          #
+          # tee로 로그에도 흘린다. Step Summary 내용은 GitHub API로 읽을 수 없어서, 표가 실제로
+          # 붙었는지 확인할 길이 로그밖에 없다. 위 가드 때문에 두 분기가 다 success로 끝나므로
+          # 스텝 결과만 봐서는 "표를 붙였다"와 "없다고 적었다"를 구분할 수 없다.
           if [ -f build/query-counts.md ]; then
-            cat build/query-counts.md >> "$GITHUB_STEP_SUMMARY"
+            tee -a "$GITHUB_STEP_SUMMARY" < build/query-counts.md
           else
-            echo "쿼리 카운트 표가 없다 — 테스트가 한 건도 실행되지 못했다." >> "$GITHUB_STEP_SUMMARY"
+            echo "쿼리 카운트 표가 없다 — 테스트가 한 건도 실행되지 못했다." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload test report on failure
