@@ -256,9 +256,19 @@ services:
     container_name: tikkit-nginx-prod
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # 로컬 TLS 인증서 (Task 039_1). nginx.conf는 **단일 파일** 마운트라 같은 경로에
+      # 인증서를 끼워 넣을 수 없어서 디렉터리를 따로 붙인다.
+      # 비어 있으면 nginx가 `cannot load certificate`로 기동에 실패한다 —
+      # `bash nginx/generate-local-cert.sh`를 먼저 한 번 돌려야 한다(산출물은 커밋 안 함).
+      - ./nginx/certs:/etc/nginx/certs:ro
     ports:
       # 유일한 외부 진입점. 브라우저는 여기만 본다.
+      #
+      # **둘 다 열어 둔다** (Task 039_1). 443은 브라우저 측정용(HTTP/2는 TLS가 선행),
+      # 80은 k6 하네스용이다(`BASE_URL: http://nginx`). 리다이렉트를 걸면 포화 측정이
+      # 죽는다. 비표준 포트를 쓰지 않는 이유는 nginx.conf의 Host 주석에 있다.
       - "80:80"
+      - "443:443"
     depends_on:
       backend1:
         condition: service_healthy
@@ -305,6 +315,16 @@ services:
       # 요청들이 backend1과 backend2로 흩어진다.
       API_BASE_URL: http://nginx
       NODE_ENV: production
+      # 브라우저가 보는 세션 쿠키에 Secure를 붙인다 (Task 039_1).
+      #
+      # 기본값이 false인 이유는 lib/session.ts 주석에 있다. 요약하면 **"http에서 깨지기
+      # 때문"이 아니다** — 실제로 켜고 http://localhost로 재 보니 쿠키가 Secure로 저장되고
+      # 로그인도 된다(Chrome이 localhost를 trustworthy origin으로 본다). 그 통과가
+      # localhost 예외에 기대고 있어서 토글로 남긴 것이다.
+      #
+      # 측정·검증할 때 셸에서 켠다:
+      #   SESSION_COOKIE_SECURE=true docker compose -f docker-compose.prod.yml up -d
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     # 호스트 포트를 열지 않는다. 브라우저는 nginx(80)로 들어온다.
     depends_on:
       backend1:
