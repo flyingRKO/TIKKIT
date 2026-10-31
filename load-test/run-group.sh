@@ -126,18 +126,13 @@ for i in $(seq 0 "$REPEAT"); do
     /" 502 /                       { s502++ }
     /" 504 /                       { s504++ }
     END {
-      printf "로그 줄 수            %d
-", total+0
-      printf "no live upstreams     %d
-", nolive+0
-      printf "임시파일 버퍼링       %d
-", tmpfile+0
-      printf "502                   %d
-", s502+0
-      printf "504                   %d
-", s504+0
+      print "로그 줄 수            " total+0
+      print "no live upstreams     " nolive+0
+      print "임시파일 버퍼링       " tmpfile+0
+      print "502                   " s502+0
+      print "504                   " s504+0
       if (total+0 == 0)
-        print "경고: 로그가 0줄이다. 0건은 \"안 터졌다\"가 아니라 \"안 읽혔다\"일 수 있다"
+        print "경고: 로그가 0줄이다. 0건은 안 터진 게 아니라 안 읽힌 것일 수 있다"
       else if (nolive+0 > 0 || tmpfile+0 > 0)
         print "경고: 이 실행은 nginx 쪽에서 오염됐다 — 014 4.7절과 같은 자리다"
     }' > "$RESULTS/${name}-nginx.txt" 2>&1 || true

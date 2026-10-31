@@ -7,6 +7,20 @@ const BASE_URL = __ENV.BASE_URL || 'http://nginx';
 
 export const API = `${BASE_URL}/api/v1`;
 
+// 응답 압축을 요구할지 (Task 039의 층② gzip 재판정).
+//
+// **k6는 Accept-Encoding을 기본으로 보내지 않는다.** 그래서 BE에 압축을 켜고 재면
+// 비압축 응답이 와서 "압축을 켠 군"과 "안 켠 군"이 같은 수치가 된다 — 실제로 한 번
+// 그렇게 쟀다(iteration당 수신이 두 군 모두 248,424B였다).
+//
+// 층②의 실제 클라이언트는 Next 서버(undici)이고 그쪽은 이 헤더를 **기본으로 보낸다**
+// (009_1 3.6절이 "undici가 Accept-Encoding을 기본 전송하고 투명 해제한다"고 확인했다).
+// 그래서 압축 군에서는 k6도 보내야 같은 것을 재는 것이 된다.
+//
+// 기본값은 빈 문자열 = 헤더를 붙이지 않음이다. 비압축 군의 조건을 건드리지 않으려면
+// 기존 측정과 바이트가 똑같아야 한다.
+export const ACCEPT_ENCODING = __ENV.ACCEPT_ENCODING || '';
+
 // 부하 유지 시간.
 //
 // Prometheus scrape_interval이 10초라서 Gauge(Hikari 풀, 힙)는 10초마다 찍히는 스냅샷이다.
