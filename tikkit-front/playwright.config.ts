@@ -15,6 +15,11 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: "on-first-retry",
+    // 로컬 TLS는 self-signed다 (Task 039_1 — nginx/generate-local-cert.sh).
+    // 체인이 없어서 이게 없으면 https://localhost 대상 실행이 net::ERR_CERT_AUTHORITY_INVALID로
+    // 전부 떨어진다. baseURL이 로컬 스택뿐이라 이 완화가 다른 데 닿지 않고,
+    // CI는 http로 돌아서 영향이 없다.
+    ignoreHTTPSErrors: true,
   },
   projects: [
     {

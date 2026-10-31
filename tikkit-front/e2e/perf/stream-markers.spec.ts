@@ -68,6 +68,23 @@ interface RunResult {
   totalBytes: number;
 }
 
+/**
+ * 이 스펙만 **브라우저가 아니라 Node 전역 fetch로** 응답을 읽는다 — HTML 스트림의 바이트
+ * 도착 시각을 재야 해서다. 그래서 https 대상으로 돌릴 때 함정이 하나 있다 (Task 039_1).
+ *
+ * playwright.config.ts의 `ignoreHTTPSErrors`는 **브라우저 컨텍스트 옵션**이라 여기엔 안 걸린다.
+ * 로컬 self-signed TLS를 세운 뒤 perf 5개 중 이 하나만 터지는 이유가 이것이다:
+ *
+ *   TypeError: fetch failed / Error: self-signed certificate
+ *
+ * 인증서를 신뢰 목록에 넣어서 넘긴다 — 검증을 끄지 않는다(NODE_TLS_REJECT_UNAUTHORIZED=0은
+ * 프로세스 전역이라 다른 스펙의 검증까지 같이 끈다):
+ *
+ *   NODE_EXTRA_CA_CERTS=./nginx/certs/localhost-cert.pem \
+ *     E2E_BASE_URL=https://localhost ... npm run perf
+ *
+ * 레포 루트에서 돌릴 때의 경로다. tikkit-front에서 돌리면 ../nginx/certs/... 다.
+ */
 async function measureOnce(url: string): Promise<RunResult> {
   const startedAt = performance.now();
   const response = await fetch(url, {
