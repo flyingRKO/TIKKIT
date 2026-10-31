@@ -113,24 +113,24 @@ public class ScheduleService {
      * 받아 역직렬화하는 비용이 이 쿼리 하나보다 비쌌다. 적중률 99.97%에서도 캐시를 켠 쪽이
      * 느렸고, 그 비용은 좌석 수에 비례해 같이 커진다 ({@code docs/improvements/008-caching.md} 4절).
      * <p>
-     * <b>Task 036: 같은 구조를 로컬 캐시로 다시 본다.</b> 029의 같은 측정에서 Caffeine은
-     * 4.98ms로 네 군 중 가장 빨랐다 — 직렬화도 네트워크도 없기 때문이다. 그때 로컬을 안 고른
-     * 이유는 힙 용량과 분산 evict였고, <b>이 캐시는 불변 필드만 담아서 evict가 필요 없다.</b>
-     * 남은 질문이 포화 구간이라서(008 4.2절이 "DB가 포화에 가까워지면 뒤집힐 수 있다"를 반례
-     * 조건으로 남겼고 040이 벽을 postgres CPU 4코어로 특정했다) 전략을
-     * {@code tikkit.cache.seatmap}으로 갈아 끼우며 측정한다. <b>기본값은 단일 쿼리다</b> —
-     * before가 사라지지 않게 한다.
+     * <b>Task 036: 로컬 캐시는 포화 구간에서 뒤집혔다 — 채택했다.</b> 008 4.2절이 "DB가 포화에
+     * 가까워지면 DB를 안 가는 것 자체의 가치가 올라간다"를 반례 조건으로 남겼고, 040이 벽을
+     * postgres CPU 4코어로 특정해 그 조건을 측정으로 세웠다. 실측은
+     * <b>768.6 → 995.1 req/s(+29.5%), postgres CPU 390.1% → 144.6%(-62.9%)</b>이고, DB 내부
+     * 실행 시간이 요청당 14.85 → 1.98ms다({@code docs/improvements/014-seatmap-assembly-cost.md}).
+     * <p>
+     * 기각된 것은 "큰 값을 Redis에 두는 것"이고 그 기각은 유지된다. 로컬이 이기는 이유는
+     * 직렬화도 네트워크도 없다는 것이고, 여기서는 담는 것이 불변 필드뿐이라 evict도 필요 없다.
+     * <p>
+     * <b>기본값은 단일 쿼리로 둔다</b> — 채택한 뒤에도 기준선을 다시 잴 수 있어야 한다
+     * ({@code cache.type}을 {@code none}으로 둔 것과 같은 이유).
      */
     public List<ScheduleSeatResponse> getSeats(Long scheduleId) {
         return buildTimer.record(() -> {
             requireScheduleExists(scheduleId);
             return switch (seatmapStrategy) {
                 case SINGLE -> scheduleSeatRepository.findSeatResponsesByScheduleId(scheduleId);
-                // SPLIT과 LOCAL은 같은 코드 경로이고 차이는 캐시 매니저뿐이다. SPLIT이면
-                // seatmapCacheManager가 NoOpCacheManager라 @Cacheable이 통과만 한다 —
-                // cache.type=none이 "어노테이션을 지우지 않고 캐시를 끄는" 것과 같은 구조이고,
-                // 그래서 분리 손해만 따로 재는 군이 코드 분기 없이 성립한다.
-                case SPLIT, LOCAL -> assembleFromLayout(scheduleId);
+                case LOCAL -> assembleFromLayout(scheduleId);
             };
         });
     }

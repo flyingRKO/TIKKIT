@@ -43,10 +43,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code none}이어도 동작한다. 008 9절이 "컨텍스트가 하나 더 늘면 Postgres 커넥션 고갈에 다시
  * 부딪힌다"고 남겼으므로, Redis 컨테이너까지 띄우는 베이스를 피해 가장 가벼운 쪽을 골랐다.
  *
- * <p><b>{@code split} 전략을 따로 테스트하지 않는 이유</b>: 코드 경로가 {@code local}과 같고
- * 차이는 캐시 매니저뿐이다({@code SPLIT}이면 {@code NoOpCacheManager}). 그래서 아래 <b>미스
- * 경로 3문장이 그대로 {@code split}의 값</b>이고, 컨텍스트를 하나 더 만들어 같은 숫자를 두 번
- * 적을 이유가 없다.
+ * <p><b>미스 경로 3문장이 "분리만 했을 때"의 값이다.</b> 측정 전용이던 {@code split} 전략은
+ * 판정 후 지웠지만(교훈 5), 그 경로의 왕복 수는 캐시 미스가 그대로 보여준다 — 캐시 히트가
+ * 되찾아야 하는 손해가 이 한 문장이다.
  */
 @Tag("query-count")
 @TestPropertySource(properties = "tikkit.cache.seatmap=local")

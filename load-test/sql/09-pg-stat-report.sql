@@ -22,7 +22,9 @@
 -- rows/call을 같이 낸다. 좌석맵이 2,000행이고 등급 조회가 3행이라, 행 수를 모르면
 -- "느린 쿼리"와 "많이 꺼내는 쿼리"가 구분되지 않는다.
 SELECT round(total_exec_time::numeric, 1)                      AS total_ms,
-       round(100 * total_exec_time / nullif(sum(total_exec_time) OVER (), 0), 1) AS pct,
+       -- round(double, int)는 Postgres에 없다. numeric만 2인자 round를 받는다 -
+       -- 처음에 캐스팅을 빼서 이 쿼리만 조용히 죽었다(Task 036 측정 1회차).
+       round((100 * total_exec_time / nullif(sum(total_exec_time) OVER (), 0))::numeric, 1) AS pct,
        calls,
        round(mean_exec_time::numeric, 3)                       AS mean_ms,
        round((rows::numeric / nullif(calls, 0)), 1)            AS rows_per_call,

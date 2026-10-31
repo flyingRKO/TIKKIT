@@ -28,7 +28,8 @@ public interface ScheduleSeatRepositoryCustom {
      * <p>
      * <b>이 메서드를 쓰면 왕복이 1 → 2로 는다.</b> 캐시를 끄고 쓰면 순손실이다(6.63 → 8.62ms,
      * {@code schedule_seats}를 두 번 읽는다). 그래서 전략 기본값이 단일 쿼리이고, 이 경로는
-     * {@code tikkit.cache.seatmap}이 {@code split} 또는 {@code local}일 때만 쓰인다.
+     * {@code tikkit.cache.seatmap=local}일 때만 쓰인다. 그 손해를 캐시 히트가 되찾는다는 것이
+     * 014의 측정이다 - 분리만 하면 -8.2%이고, 캐시를 켜면 +29.5%다.
      */
     List<ScheduleSeatLayoutRow> findSeatLayoutByScheduleId(Long scheduleId);
 

@@ -93,15 +93,19 @@ public class CacheConfig {
      * 끄면 적중률이 영구히 비어서 "캐시가 프록시를 안 타고 있다"(008 3.1절의 자기호출 함정)를
      * 적중률 0%로 발견할 수단이 없어진다.
      *
-     * <h2>maximumSize가 측정 축인 이유</h2>
-     * 008이 로컬 캐시를 기각한 근거 중 "힙 용량"은 아직 유효하다 — 2,000개 객체 그래프 × 회차
-     * 수이고, 008은 회차 3,000개면 Redis 기준 1.15GB라고 적었다. 상한을 두면 LRU가 핫한 회차만
-     * 남기므로 그 근거가 정책으로 다뤄지는지를 재야 한다. 그래서 프로퍼티로 뺐다.
+     * <h2>maximumSize는 운영 설정값이다 — 작업 집합보다 커야 한다</h2>
+     * 008이 로컬 캐시를 기각한 근거 중 "힙 용량"은 <b>유효했지만 방향이 반대였다.</b> 008은
+     * "상한에 묶인다"고 적었는데, 600회차를 200칸에 담은 군은 적중률 33.5%로 처리량 이득이
+     * +1.7%(산포 안)로 사라지면서 <b>힙은 오히려 더 썼다</b>(Old Gen 311 → 497MB) — 축출
+     * 52,768건이 만든 쓰레기다. 즉 상한을 줄이는 것으로 힙을 아낄 수 없다. 담거나 안 하거나다.
+     * <p>
+     * 그래서 이 값은 "동시에 조회되는 회차 수"보다 커야 하고, 회차당 약 420KB를 본다
+     * ({@code docs/improvements/014-seatmap-assembly-cost.md} 4.3절).
      */
     @Bean
     public CacheManager seatmapCacheManager(CacheProperties properties) {
         if (properties.seatmap() != CacheProperties.SeatmapStrategy.LOCAL) {
-            // 전략이 SINGLE·SPLIT이면 캐시 자체를 올리지 않는다. @Cacheable을 지우지 않고도
+            // 전략이 SINGLE이면 캐시 자체를 올리지 않는다. @Cacheable을 지우지 않고도
             // 완전히 꺼지는 구조는 cache.type=none이 NoOpCacheManager를 올리는 것과 같다.
             return new NoOpCacheManager();
         }
