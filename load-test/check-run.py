@@ -42,6 +42,25 @@ PROFILES = {
         'bytes_per_iter': 200_000,
         'seatmap_seats_min': 1900,
     },
+    # 좌석맵 + 응답 압축 — Task 039의 gzip 재판정 군.
+    #
+    # **바이트 하한을 낮추는 것이 이 프로필의 전부다.** 압축이 걸리면 k6가 받는
+    # data_received가 19:1로 줄어(247,885 -> 13,086B. 009_1 3.6절) 위 'seatmap' 프로필의
+    # 200,000B에 전 군이 걸린다. 그러면 "응답이 비어 오고 있다"로 FAIL인데 실제로는
+    # 멀쩡한 실행이다.
+    #
+    # 장치를 끄는 게 아니라 **무결성의 본체를 바이트에서 좌석 수로 옮기는** 것이다.
+    # 이 파일 아래 (5)번 주석이 이미 그 근거를 적어 뒀다 — 바이트는 schedule_seats.id
+    # 자릿수에도 반응하므로 좌석 수가 더 믿을 만한 신호다. 압축은 그 "덜 믿을 만한 축"을
+    # 하나 더 흔드는 변경이라, 압축 군에서는 seatmap_seats가 유일한 붕괴 탐지기다.
+    #
+    # 10,000B는 13,086B에 약 24% 여유다. 압축률은 좌석 id 자릿수와 등급 분포에 따라
+    # 흔들리므로 실측값에 딱 붙이지 않는다.
+    'seatmap-gzip': {
+        'reqs_per_iter': 0.9,
+        'bytes_per_iter': 10_000,
+        'seatmap_seats_min': 1900,
+    },
     # 탐색 — 목록 1 + 상세 1 + 등급 1 = 3개.
     'browse': {
         'reqs_per_iter': 2.5,
@@ -64,6 +83,10 @@ PROFILES = {
 
 def guess_profile(path: Path) -> str | None:
     name = path.name.lower()
+    # gzip 군이 'seatmap'으로 추정되면 바이트 하한 200KB에 걸려 전부 FAIL이 된다.
+    # 태그에 gzip이 들어가 있으면 압축 프로필로 본다 (Task 039).
+    if 'seatmap' in name and 'gzip' in name:
+        return 'seatmap-gzip'
     if 'seatmap' in name:
         return 'seatmap'
     if 'browse' in name:

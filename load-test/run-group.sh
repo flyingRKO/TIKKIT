@@ -13,6 +13,9 @@
 #   4) 워크로드 무결성 판정    -> results/<tag>-<n>-integrity.txt (check-run.py)
 #   5) 쿼리별 실행 시간        -> results/<tag>-<n>-pgss.txt    (Task 036. 09 읽기)
 #      확장이 없으면 에러 텍스트가 남는다 — sql/08을 한 번 돌려야 한다는 신호다.
+#   6) nginx 로그 집계         -> results/<tag>-<n>-nginx.txt   (Task 039)
+#      no live upstreams / 임시파일 버퍼링 / 502·504 건수. 036에서 이게 없어서 각 군
+#      3회차가 전부 502인 것을 **사후에 손으로** 찾았다 (014 4.7절).
 #
 # 쓰는 법:
 #   bash load-test/run-group.sh <tag> <script.js> <반복수> [k6 -e 인자들...]
@@ -50,6 +53,11 @@ case "$SCRIPT" in
   booking-spike.js) PROFILE=booking ;;
   *)                PROFILE="" ;;
 esac
+
+# 같은 스크립트로 기대값이 다른 군을 돌릴 때 덮는다 (Task 039의 gzip 군이 그렇다 —
+# seatmap.js를 그대로 쓰는데 압축 때문에 수신 바이트 하한이 다르다).
+#   PROFILE_OVERRIDE=seatmap-gzip bash load-test/run-group.sh t039-c-gzip seatmap.js 3 ...
+PROFILE="${PROFILE_OVERRIDE:-$PROFILE}"
 RESULTS="load-test/results"
 mkdir -p "$RESULTS"
 
@@ -81,6 +89,10 @@ for i in $(seq 0 "$REPEAT"); do
   bash load-test/sample-backend-metrics.sh "$RESULTS/${name}-metrics.csv" 2 &
   sampler_pid=$!
 
+  # nginx 로그를 어디서부터 읽을지 잡는다 (Task 039). 실행 전 시각을 쓰므로 이전 회차
+  # 로그가 섞이지 않는다. UTC로 뽑는 이유: docker는 --since를 UTC 기준으로 읽는다.
+  log_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
   k6_rc=0
   $COMPOSE --profile load run --rm --no-deps k6 run \
     "$@" --summary-export="/results/${name}.json" "/scripts/${SCRIPT}" || k6_rc=$?
@@ -100,6 +112,31 @@ for i in $(seq 0 "$REPEAT"); do
   # 그대로 남기고 넘어간다 — 조용히 빈 파일을 만들면 "안 쌓였다"와 "안 돌았다"를
   # 구분할 수 없다(교훈 1의 작은 판본. 통과했다는 신호와 일을 했다는 신호는 다르다).
   $PSQL -f - < load-test/sql/09-pg-stat-report.sql > "$RESULTS/${name}-pgss.txt" 2>&1 || true
+
+  # nginx 로그 집계 (Task 039). 한 번만 읽고 awk로 한 번에 센다 — 포화 45초면 로그가
+  # 100만 줄 단위라 패턴마다 다시 읽으면 집계가 측정보다 오래 걸린다.
+  #
+  # **총 줄 수를 같이 남기는 게 핵심이다.** 009 6.2절이 `error_log /dev/stderr`를 빈 파일로
+  # 읽어 "0건"을 얻고 그걸 증거로 쓸 뻔했다 — 빈 파일에서 나온 0건은 증거가 아니라
+  # 측정 실패다. 총 줄 수가 0이면 아래 경고가 그걸 구분해 준다.
+  $COMPOSE logs --since "$log_since" nginx 2>/dev/null | awk '
+    { total++ }
+    /no live upstreams/            { nolive++ }
+    /buffered to a temporary file/ { tmpfile++ }
+    /" 502 /                       { s502++ }
+    /" 504 /                       { s504++ }
+    END {
+      print "로그 줄 수            " total+0
+      print "no live upstreams     " nolive+0
+      print "임시파일 버퍼링       " tmpfile+0
+      print "502                   " s502+0
+      print "504                   " s504+0
+      if (total+0 == 0)
+        print "경고: 로그가 0줄이다. 0건은 안 터진 게 아니라 안 읽힌 것일 수 있다"
+      else if (nolive+0 > 0 || tmpfile+0 > 0)
+        print "경고: 이 실행은 nginx 쪽에서 오염됐다 — 014 4.7절과 같은 자리다"
+    }' > "$RESULTS/${name}-nginx.txt" 2>&1 || true
+  cat "$RESULTS/${name}-nginx.txt"
 
   python load-test/check-run.py ${PROFILE:+--profile "$PROFILE"} "$RESULTS/${name}.json" | tee "$RESULTS/${name}-integrity.txt" || true
   echo

@@ -2,7 +2,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate } from 'k6/metrics';
-import { API } from './config.js';
+import { API, ACCEPT_ENCODING } from './config.js';
 
 // k6 내장 http_req_failed는 HTTP 상태만 본다. 그런데 이 서비스는 좌석 경쟁에서 밀린 요청에
 // 409 SOLD_OUT을 돌려준다 — 서버가 올바르게 막아낸 것이지 장애가 아니다.
@@ -117,8 +117,15 @@ export function classify(res, label) {
 }
 
 function request(method, path, payload, label) {
+  // ACCEPT_ENCODING이 비어 있으면 헤더를 아예 붙이지 않는다 (Task 039). 빈 값으로 붙이면
+  // 비압축 군의 요청 헤더가 기존 측정과 달라져서 비교가 어긋난다.
+  const headers = { 'Content-Type': 'application/json' };
+  if (ACCEPT_ENCODING !== '') {
+    headers['Accept-Encoding'] = ACCEPT_ENCODING;
+  }
+
   const params = {
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers,
     tags: {
       // 엔드포인트별 p95를 뽑는 라벨.
       step: label,
