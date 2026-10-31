@@ -63,7 +63,7 @@ ROADMAP 기술 스택 표에 k6가 적혀 있었지만 비교 근거가 문서�
 
 | 항목 | 내용 |
 |---|---|
-| 호스트 | Windows 11, 16 코어, RAM 31GB (Docker Desktop) |
+| 호스트 | Windows 11 **데스크톱** — AMD Ryzen 7 7800X3D(**물리 8코어 / 16 논리 스레드**, L3 96MB), RAM 63GB, NVMe 2TB. 그중 Docker Desktop(WSL2) 할당 **31.5GB**(`.wslconfig`가 없어 기본값 = 호스트의 50%). 공통 기재는 [README](README.md) 「측정 환경 (공통)」 |
 | 스택 | `docker-compose.prod.yml` — nginx 1 + BE 2 + FE 1 + PostgreSQL 15.18 + Redis 7.4 + Prometheus + Grafana |
 | 부하 생성기 | k6 2.3.0, **같은 호스트의 compose 서비스**(`--profile load`) |
 | 진입 경로 | `http://nginx` → backend1/backend2 라운드로빈 (실제 사용자와 같은 경로) |
@@ -75,7 +75,7 @@ ROADMAP 기술 스택 표에 k6가 적혀 있었지만 비교 근거가 문서�
 
 > [!warning] 확인 필요
 > **부하 생성기와 측정 대상이 같은 호스트에서 돈다.** BE 2대 + PostgreSQL(600만 행) + Redis +
-> Prometheus + Grafana + k6가 한 노트북에 있다. 아래 수치에서 BE CPU 최대가 8.3%라
+> Prometheus + Grafana + k6가 **한 대(물리 8코어)** 에 있다. 아래 수치에서 BE CPU 최대가 8.3%라
 > 이번 부하 수준에서는 CPU 경쟁이 결론을 바꿀 정도는 아니었지만, 부하를 더 올리면
 > p95가 서버 지연인지 생성기 굶주림인지 구분할 수 없게 된다. 9절 참조.
 
@@ -546,7 +546,7 @@ Task 025에서 만든 예매 패널이다. 성공이 **30 ops/s**까지 올라�
 | Hikari `pending` 최대 | 0 | **0** | 둘 다 포화 없음 |
 | Hikari `idle` 최소 | 9 | **9** | |
 | heap 최대 | 142.8MB | **188.8MB** | 데이터 규모 반영 |
-| BE CPU 최대 | 3.2% | **4.2%** (경쟁 시 8.3%) | 16코어 기준 |
+| BE CPU 최대 | 3.2% | **4.2%** (경쟁 시 8.3%) | 16 논리 스레드 기준(물리 8코어) |
 | live threads 최대 | - | **30** | 신규 측정 |
 | 최대 처리량 | 81.9 req/s | **82.2 req/s** | 생성기가 다르다(*) |
 
@@ -606,7 +606,7 @@ URL밖에 모른다(4.4절).
 ## 9. 한계
 
 - **부하 생성기와 측정 대상이 같은 호스트에서 돈다.** BE 2대 + PostgreSQL(600만 행) + Redis +
-  Prometheus + Grafana + k6가 16코어 한 대에 있다. 이번에는 BE CPU 최대가 8.3%라 결론을
+  Prometheus + Grafana + k6가 **16 논리 스레드(물리 8코어)** 한 대에 있다. 이번에는 BE CPU 최대가 8.3%라 결론을
   바꾸지 않았지만, 부하를 더 올리면 p95가 서버 지연인지 생성기 굶주림인지 구분할 수 없다.
   분산 부하는 k6 OSS에서 k8s(k6-operator)가 필요해 범위 밖이다.
 - **이 수치는 "한계 용량"이 아니라 "저부하 구간의 지연"이다.** BE CPU 최대 4.2%, Hikari
