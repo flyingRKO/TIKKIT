@@ -630,9 +630,9 @@ stale 좌석 때문이고, A′·F에서는 0건이다.
   재두면 규칙이 된다.
 - **[미배정] 테스트 컨테이너 `max_connections`**: 9절 마지막 항목. 지금은 캐시 테스트 풀을 줄여
   피했을 뿐이고, 컨텍스트가 하나 더 늘면 다시 깨진다.
-- **[미배정] 쿼리 카운트를 CI에 걸지 않았다**: 007이 남긴 그대로다. 이번에 테스트가 10개에서
-  늘었지만 여전히 `./gradlew test`에 섞여 돌 뿐이고, "문장 수가 늘었다"를 PR에서 눈에 띄게
-  만드는 장치는 없다.
+- ~~**[미배정] 쿼리 카운트를 CI에 걸지 않았다**~~ — **완료**(Task 042_1). 007과 똑같이 적어서
+  똑같이 틀렸다(섞여 돌던 그 `test`가 CI에서 돌고 있었다). 맞은 쪽은 뒷줄이고, 그걸
+  전용 잡 + Step Summary 표로 닫았다. 자세한 것은 `013-query-count-gate.md`에 있다.
 
 **범위 밖에서 발견한 것**:
 
@@ -652,9 +652,12 @@ stale 좌석 때문이고, A′·F에서는 0건이다.
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 # 1. 테스트 — 캐시 off 기준값과 Redis 컨테이너를 띄우는 캐시 테스트가 같이 돈다
-cd tikkit-back && ./gradlew test
+#    Task 042_1이 쿼리 카운트를 queryCountTest로 떼어냈다. 전부 돌리려면 check다.
+cd tikkit-back && ./gradlew check
+#   [queryCountTest]
 #   *QueryCountTest       : 캐시 off의 문장 수 (목록 1/2, 상세 2, 등급 2, 좌석맵 2)
 #   CacheQueryCountTest   : Redis 캐시의 미스/히트 문장 수 + 적중률 지표
+#   [test]
 #   CacheTtlTest          : PTTL을 직접 읽어 캐시별 TTL 확인 (6.1절)
 #   CacheSerializationTest: record·BigDecimal·Instant 왕복
 #   CacheEvictionTest     : 배치가 파생값을 바꿀 때만 evict

@@ -221,7 +221,7 @@ Git Bash에서 돌린다면 위 커맨드 앞에 `export MSYS_NO_PATHCONV=1 MSYS
 #### 쿼리·인덱스 최적화 (Task 028)
 
 ```bash
-cd tikkit-back && ./gradlew test --tests "*QueryCountTest"
+cd tikkit-back && ./gradlew queryCountTest
 ```
 
 경로별 쿼리 문장 수를 숫자로 고정한 테스트입니다. N+1은 응답 시간으로는 보이지 않아서

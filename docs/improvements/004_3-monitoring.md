@@ -482,8 +482,9 @@ Task 024에서 겪은 `NoResourceFoundException` 사건과 같은 부류다.
 
 ```bash
 # 1. 단위·통합 테스트 (actuator 접근 제어 + Boot 4 지표명 고정)
-cd tikkit-back && ./gradlew test
-# -> BUILD SUCCESSFUL, 129개
+#    Task 042_1이 쿼리 카운트를 queryCountTest로 떼어냈다 — 전부 돌리려면 check다
+cd tikkit-back && ./gradlew check
+# -> BUILD SUCCESSFUL, 당시 129개
 
 # 2. 전체 스택 + 모니터링 기동
 #    시드 회차가 상대 날짜라 27일 지난 볼륨은 ON_SALE이 0이 된다 -> 반드시 down -v

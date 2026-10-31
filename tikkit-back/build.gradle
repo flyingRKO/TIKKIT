@@ -116,6 +116,28 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-postgresql'
 }
 
+// 쿼리 카운트 테스트는 queryCountTest가 전담한다 (Task 042_1).
+// 같은 테스트가 CI의 두 잡에서 중복으로 돌지 않게 여기서 뺀다 — 전체는 `./gradlew check`다.
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'query-count'
+    }
+}
+
+// 경로별 SQL 문장 수를 고정하는 게이트. CI에서 독립 잡으로 돌아 PR 체크에 따로 뜬다.
+// 통과했을 때도 숫자를 남기려고 QueryCountReport가 build/query-counts.md를 쓴다.
+tasks.register('queryCountTest', Test) {
+    group = 'verification'
+    description = '경로별 SQL 문장 수를 고정한다 (Task 042_1)'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'query-count'
+    }
+    // UP-TO-DATE로 건너뛰면 요약 표가 안 만들어져서 Step Summary가 빈다.
+    outputs.upToDateWhen { false }
+}
+
+tasks.named('check') {
+    dependsOn 'queryCountTest'
 }

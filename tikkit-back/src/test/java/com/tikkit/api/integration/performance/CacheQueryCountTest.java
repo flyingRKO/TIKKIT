@@ -13,15 +13,16 @@ import com.tikkit.api.domain.performance.service.ScheduleService;
 import com.tikkit.api.domain.reservation.dto.ReservationCreateRequest;
 import com.tikkit.api.domain.reservation.service.ReservationService;
 import com.tikkit.api.support.AbstractRedisCacheContainerTest;
+import com.tikkit.api.support.QueryCountReport;
 import com.tikkit.api.support.QueryCounter;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.Cache;
 import org.springframework.data.redis.cache.RedisCacheManager;
 
 import java.util.List;
@@ -41,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 부하 측정 중에나 보인다. "두 번째 호출의 쿼리 수가 줄었다"를 테스트로 고정해 두면 구현이
  * 깨지는 순간 CI에서 잡힌다.
  */
+@Tag("query-count")
 class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
 
     @Autowired
@@ -78,9 +80,10 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
                 .phone("010-0000-0000")
                 .role(MemberRole.USER)
                 .build()).getId();
-        // Redis 비우기는 AbstractRedisCacheContainerTest가 FLUSHDB로 처리한다.
-        // truncate는 DB만 비우는데 id가 RESTART IDENTITY로 1부터 다시 시작하므로,
-        // Redis를 같이 비우지 않으면 **다른 픽스처의 캐시를 히트한다**.
+        // truncate는 DB만 비우는데 id가 RESTART IDENTITY로 1부터 다시 시작하므로, 그냥 두면
+        // **다른 픽스처의 캐시를 히트한다**. AbstractRedisCacheContainerTest가 그걸 FLUSHDB가
+        // 아니라 isolateCacheKeySpace()로 막는다 — 테스트마다 id 구간을 1,000씩 밀고 목록
+        // 페이지 크기를 바꿔 키를 가른다 (FLUSHDB는 같은 Redis를 쓰는 다른 컨텍스트까지 날린다).
     }
 
     @Test
@@ -127,6 +130,8 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         // "히트가 0문장이 아니다"뿐이라 원인이 안 보인다).
         awaitCached(CacheNames.PERFORMANCE_LIST, listCacheKey());
         long hit = queryCounter.count(() -> performanceService.list(null, null, "ON_SALE", 0, listPageSize));
+        QueryCountReport.record("GET /performances (캐시 miss)", miss);
+        QueryCountReport.record("GET /performances (캐시 hit)", hit);
 
         assertThat(miss).isEqualTo(1);
         assertThat(hit).isZero();
@@ -137,6 +142,8 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
     void keyword_검색은_캐시하지_않는다() {
         long first = queryCounter.count(() -> performanceService.list(null, "부하", "ON_SALE", 0, 20));
         long second = queryCounter.count(() -> performanceService.list(null, "부하", "ON_SALE", 0, 20));
+        QueryCountReport.record("GET /performances?keyword (캐시 안 함, 1회차)", first);
+        QueryCountReport.record("GET /performances?keyword (캐시 안 함, 2회차)", second);
 
         // 두 번 다 DB를 친다. 캐시를 탔다면 두 번째가 0이 된다.
         assertThat(first).isEqualTo(second).isEqualTo(1);
@@ -154,6 +161,8 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         // "히트가 0문장이 아니다"뿐이라 원인이 안 보인다).
         awaitCached(CacheNames.PERFORMANCE_DETAIL, performanceId);
         long hit = queryCounter.count(() -> performanceService.getDetail(performanceId));
+        QueryCountReport.record("GET /performances/{id} (캐시 miss)", miss);
+        QueryCountReport.record("GET /performances/{id} (캐시 hit)", hit);
 
         assertThat(miss).isEqualTo(2);
         assertThat(hit).isZero();
@@ -170,6 +179,8 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
         // "히트가 0문장이 아니다"뿐이라 원인이 안 보인다).
         awaitCached(CacheNames.GRADE_PRICES, scheduleId);
         long hit = queryCounter.count(() -> scheduleService.getTicketGrades(scheduleId));
+        QueryCountReport.record("GET /schedules/{id}/ticket-grades (캐시 miss)", miss);
+        QueryCountReport.record("GET /schedules/{id}/ticket-grades (캐시 hit)", hit);
 
         // 미스: 등급 행 + COUNT. 히트: COUNT만.
         // 0이 아닌 게 핵심이다 — 잔여 수량까지 캐시하면 매진된 회차가 TTL 동안 "잔여 있음"으로 보인다.
@@ -183,6 +194,8 @@ class CacheQueryCountTest extends AbstractRedisCacheContainerTest {
     void 좌석맵은_캐시되지_않는다() {
         long first = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
         long second = queryCounter.count(() -> scheduleService.getSeats(scheduleId));
+        QueryCountReport.record("GET /schedules/{id}/seats (캐시 켬, 1회차)", first);
+        QueryCountReport.record("GET /schedules/{id}/seats (캐시 켬, 2회차)", second);
 
         // 회차 존재 확인 + 좌석 조회 = 2문장. 캐시를 켜도 줄지 않는다.
         // Task 029에서 배치(불변)만 캐시해 히트 시 1문장으로 줄여 봤지만, 캐시 항목이

@@ -547,7 +547,8 @@ docker compose down -v && docker compose up -d
 #       [결제-만료 경쟁 차단]으로 출력된다
 
 # 3. 전체 테스트
-./gradlew test
+#    Task 042_1이 쿼리 카운트를 queryCountTest로 떼어냈다 — 전부 돌리려면 check다
+./gradlew check
 
 # 4. HOT 업데이트 비율 (8절) — e2e나 동시성 테스트를 한 번 돌린 뒤
 docker exec -it tikkit-postgres psql -U tikkit_user -d tikkit_db -c "

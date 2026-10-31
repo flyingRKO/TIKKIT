@@ -119,7 +119,9 @@ Controller → Service → Repository → Entity
 ```bash
 ./gradlew bootRun           # 개발 서버 실행 (포트: 8080)
 ./gradlew build             # 프로덕션 빌드
-./gradlew test              # 테스트 실행
+./gradlew test              # 테스트 실행 (쿼리 카운트 제외 — Task 042_1)
+./gradlew queryCountTest    # 경로별 SQL 문장 수 게이트 (Task 042_1)
+./gradlew check             # 전부 (test + queryCountTest)
 ./gradlew clean             # 빌드 산출물 삭제
 ```
 
