@@ -617,8 +617,9 @@ Phase 7이 끝난다. `v0.4.0-ops` 태그를 만든다.
 cp .env.example .env
 docker compose -f docker-compose.prod.yml down -v    # 시드가 상대 날짜라 매번 비우고 시작
 
-# 1. 단위·통합 테스트 (132개)
-cd tikkit-back && ./gradlew test && cd ..
+# 1. 단위·통합 테스트 (당시 132개)
+#    Task 042_1이 쿼리 카운트를 queryCountTest로 떼어냈다 — 전부 돌리려면 check다
+cd tikkit-back && ./gradlew check && cd ..
 # -> BUILD SUCCESSFUL, 실패·에러·건너뜀 0
 #    RedisSessionAuthIntegrationTest가 Testcontainers Redis를 띄워 강제 로그아웃까지 검증한다
 

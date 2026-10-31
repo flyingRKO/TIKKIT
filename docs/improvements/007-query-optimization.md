@@ -520,8 +520,11 @@ ON_SALE 1,003행 안에 서로 다른 `start_date`가 5종뿐이라서 Increment
   근거가 없지만, 회원 수가 늘면 선형으로 벌어진다. 고치는 방법은 둘이고 성격이 다르다 —
   리포지토리를 `lower(email) = ?`로 바꾸면(인덱스 추가 0) 인증 쿼리의 의미가 바뀌고,
   `members(email)` 인덱스를 새로 만들면 함수 인덱스와 중복된다.
-- **[미배정] 쿼리 카운트를 CI에 걸지 않았다.** 테스트는 있지만 `./gradlew test`에 섞여 돌 뿐이고,
-  "문장 수가 늘어났다"를 PR에서 눈에 띄게 만드는 장치는 없다.
+- ~~**[미배정] 쿼리 카운트를 CI에 걸지 않았다.**~~ — **완료**(Task 042_1). 여기 적은 두 줄 중
+  **뒷줄만 맞았다.** 테스트는 `./gradlew test`에 섞여 있었고 그 `test`가 CI에서 돌고 있었으므로
+  "CI에 걸지 않았다"는 틀렸다 — 로드맵이 이 항목을 그렇게 요약해서 Task 042_1의 근거가
+  한동안 어긋나 있었다. 실제 공백은 **"PR에서 눈에 띄게 만드는 장치가 없다"** 하나였고,
+  `@Tag("query-count")` + 전용 잡 + `build/query-counts.md`를 Step Summary에 붙이는 것으로 닫았다.
 
 **범위 밖에서 발견한 것**:
 
@@ -543,8 +546,10 @@ export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 # 1. 스택 기동 + 데이터 주입 (006 "재현 방법" 1~3번과 동일, schedule_seats 약 600만 행)
 
 # 2. 쿼리 카운트 테스트 — 이 Task의 유일한 자동 검증 수단이다
-cd tikkit-back && ./gradlew test --tests "*QueryCountTest"
-# -> 10개 통과. POST /reservations 가 6문장으로 고정돼 있다
+#    Task 042_1이 전용 태스크로 분리했다(태그 query-count). `./gradlew test`에는 더 이상 안 섞인다.
+cd tikkit-back && ./gradlew queryCountTest
+# -> 통과. POST /reservations 가 6문장으로 고정돼 있다
+#    build/query-counts.md 에 경로별 문장 수 표가 생긴다 (CI는 이걸 Step Summary에 붙인다)
 
 # 3. Hibernate가 실제로 만든 SQL 받아오기 (SQL을 손으로 재구성하지 않는다 — 2절)
 #    application-test.yml 의 show-sql: true 가 켜져 있으므로 리포지토리 테스트 로그에 그대로 찍힌다

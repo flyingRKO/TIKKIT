@@ -338,7 +338,8 @@ EOF
 #   -> 현재 0건. asText()를 되돌리면 3건이 나온다
 
 # 4. 전체 테스트 (6절)
-docker compose up -d && ./gradlew test        # 123개
+#    Task 042_1이 쿼리 카운트를 queryCountTest로 떼어냈다 — 전부 돌리려면 check다
+docker compose up -d && ./gradlew check       # 당시 123개
 ./gradlew test --tests '*ReservationConcurrencyTest*'
 #   -> [초과 판매 차단] 201 10건 / 409 90건 등이 로그에 찍힌다
 
