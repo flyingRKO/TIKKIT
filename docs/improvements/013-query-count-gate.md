@@ -115,6 +115,36 @@ Redis 1개만 띄우므로 `backend`(Redis 3개)보다 가볍다.
 `GET /performances (size 20)` → `GET /performances/{id}` 순으로 같은 경로의 변형들이 붙어 보인다.
 정렬 순서를 따로 선언하지 않아도 되는 이유이고, 라벨을 007 5.1절 표기로 고정한 이유다.
 
+### 2.3 표를 로그에도 흘린다 — 가드가 검증 경로를 막고 있었다
+
+처음 쓴 스텝은 표를 `$GITHUB_STEP_SUMMARY`에만 붙였고, 파일이 없을 때를 대비해 가드를 달았다.
+
+```bash
+if [ -f build/query-counts.md ]; then
+  cat build/query-counts.md >> "$GITHUB_STEP_SUMMARY"
+else
+  echo "쿼리 카운트 표가 없다 ..." >> "$GITHUB_STEP_SUMMARY"
+fi
+```
+
+가드 자체는 맞다 — 컴파일이 깨져 표가 없을 때 `cat`이 실패하면 **진짜 원인이 가려진다.**
+그런데 이 구조는 **두 분기가 다 `success`로 끝난다.** 첫 PR에서 그걸 확인하려다 막혔다:
+
+- **Step Summary 내용은 GitHub API로 읽을 수 없다.** 잡 로그에도 안 들어간다 — 리다이렉션의
+  대상이 파일이라 stdout을 지나지 않는다
+- 그래서 확인할 수 있는 것이 `Publish query counts` 스텝의 `conclusion: success`까지인데,
+  그 값은 **표를 붙였을 때와 "없다"고 적었을 때가 같다**
+
+`queryCountTest`가 통과했으니 파일은 있었던 게 맞지만, 그건 추론이고 확인이 아니다. 교훈 1이
+말하는 자리다 — **장치가 통과했다는 신호와 장치가 일을 했다는 신호를 구분해야 한다.**
+`cat`을 `tee`로 바꿔 같은 내용을 로그에도 흘린다.
+
+```bash
+tee -a "$GITHUB_STEP_SUMMARY" < build/query-counts.md
+```
+
+렌더링된 모양은 여전히 Summary 탭에서만 보이지만, **내용은 이제 로그로 확인된다.**
+
 ---
 
 ## 3. 게이트가 실제로 잡는지 재현했다
@@ -217,6 +247,9 @@ ReservationQueryCountTest > 예매 선점은 좌석 수와 무관하게 6문장�
   빨라지지 않은 것과 같은 축이다. 이 게이트가 통과한다는 것은 "왕복 수가 그대로다"까지만 보증한다
 - **쿼리 수를 Testcontainers 소량 데이터에서 센다.** 문장 수는 데이터 크기와 무관하므로 값은
   유효하다는 007 7절의 판단을 그대로 유지했다
+- **Step Summary의 렌더링 자체는 눈으로만 확인된다.** 내용은 로그에 찍히게 했지만(2.3절),
+  "표로 보이는가"는 API로 읽을 수 없어서 자동 검증 대상이 아니다. 마크다운 표가 깨지는 변경
+  (예: 라벨에 `|`가 들어가는 경로를 추가하는 것)은 아무것도 안 잡는다
 
 ---
 
@@ -257,4 +290,11 @@ git checkout -- src/main/java/com/tikkit/api/domain/performance/repository/Ticke
 ```
 
 CI 쪽은 PR에서만 확인된다 — 체크 목록에 `query-count`가 `backend`와 따로 뜨는지, 그 잡의
-Summary 탭에 표가 보이는지. **Step Summary는 로컬에서 확인할 수 없는 유일한 항목이다.**
+`Publish query counts` 스텝 **로그에 표가 찍히는지**(2.3절). 표의 내용은 로그로 보지만
+**렌더링된 모양은 Summary 탭을 눈으로 봐야 한다** — 거기만 자동 검증 밖이다.
+
+```bash
+# 머지된 실행에서 확인하는 방법
+gh pr checks <PR 번호>                                   # query-count가 독립 체크로 뜬다
+gh run view --job <job id> --log | grep "POST /reservations"
+```
