@@ -25,6 +25,22 @@
 
 SELECT pg_stat_reset();
 
+-- 쿼리별 통계도 같이 비운다 (Task 036). pg_stat_reset()은 pg_stat_statements를 건드리지
+-- 않는다 — 별개 확장의 공유 메모리라서 리셋 함수가 따로 있다. 안 비우면 09 리포트의
+-- total_exec_time이 직전 군까지 더해진 값이 되고, 군 사이 차이가 누적값에 묻힌다.
+--
+-- 확장이 없어도 이 스크립트가 깨지지 않게 조건부로 돈다. 040의 측정을 그대로 재현할 때는
+-- shared_preload_libraries 없이 뜬 컨테이너일 수 있고, 그때 06이 죽으면 측정 루프가 멈춘다.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') THEN
+        PERFORM pg_stat_statements_reset();
+        RAISE NOTICE 'pg_stat_statements_reset() 실행';
+    ELSE
+        RAISE NOTICE 'pg_stat_statements 확장 없음 - 쿼리 통계는 안 모은다 (sql/08 참고)';
+    END IF;
+END $$;
+
 -- 리셋이 먹었는지 확인한다. 돌아오는 값이 0이 아니면 k6 실행 전에 이미 누가 읽은 것이다
 -- (예: 다른 셸에서 psql로 조회했거나, BE가 기동 중 Flyway validate를 돌렸다).
 SELECT current_setting('shared_buffers')   AS shared_buffers,

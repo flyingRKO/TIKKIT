@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         //
         // 줄이지 않으면 **Postgres 커넥션이 고갈된다.** 스프링 테스트 컨텍스트는 캐시되고
         // 실행이 끝날 때까지 닫히지 않으므로 풀이 컨텍스트마다 쌓인다. 캐시 토글 조합마다
-        // 컨텍스트가 하나씩 생기는데(redis / caffeine / redis+응답바이트) 각각 30이면
+        // 컨텍스트가 하나씩 생기는데(none / redis / 좌석맵 전략별) 각각 30이면
         // 기본 max_connections(100)를 넘고, 증상은 캐시와 무관한 테스트에서
         // "FATAL: sorry, too many clients already"로 나타난다.
         "spring.datasource.hikari.maximum-pool-size=5",

@@ -4,12 +4,14 @@ import com.querydsl.core.Tuple;
 import com.querydsl.core.types.Projections;
 import com.querydsl.core.types.dsl.NumberExpression;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
 import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.entity.QScheduleSeat;
 import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.venue.entity.QSeat;
 import lombok.RequiredArgsConstructor;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -60,6 +62,56 @@ public class ScheduleSeatRepositoryImpl implements ScheduleSeatRepositoryCustom 
                 .where(scheduleSeat.schedule.id.eq(scheduleId))
                 .orderBy(seat.posY.asc(), seat.posX.asc())
                 .fetch();
+    }
+
+    /**
+     * 위 단일 쿼리에서 {@code status}를 뺀 것 (Task 036). 캐시 대상이다.
+     *
+     * <p>조인과 정렬은 그대로 둔다 — 빠지는 건 {@code schedule_seats.status} 컬럼 하나뿐이다.
+     * 전송 바이트는 좌석당 몇 바이트 줄지만 <b>행 수는 같다.</b> 040이 특정한 벽이 "2,000행 튜플
+     * 구성과 237KB 전송"이었으므로, 이 쿼리만으로는 그 비용이 거의 안 줄어든다. 줄어드는 것은
+     * <b>캐시 히트로 이 쿼리를 아예 안 돌릴 때</b>다. 그게 이 Task가 보려는 전부다.
+     *
+     * <p>짝인 {@link #findSeatStatusesByScheduleId}도 2,000행을 꺼내므로 <b>히트 경로에도 2,000행
+     * 조회가 하나 남는다.</b> 상태를 전부 가져오는 대신 AVAILABLE이 아닌 좌석만 꺼내면 행 수가
+     * 수십~수백으로 줄지만, 그러면 029가 쟀던 구조와 달라져 008 4.1절 수치와 직접 비교가 안 된다.
+     * <b>036은 먼저 같은 구조로 재서 warning을 닫고, 델타 조회는 그 결과를 보고 판단한다.</b>
+     */
+    @Override
+    public List<ScheduleSeatLayoutRow> findSeatLayoutByScheduleId(Long scheduleId) {
+        return queryFactory
+                .select(Projections.constructor(ScheduleSeatLayoutRow.class,
+                        scheduleSeat.id, seat.section, seat.rowLabel, seat.seatNumber,
+                        seat.posX, seat.posY, scheduleSeat.ticketGrade.id))
+                .from(scheduleSeat)
+                .join(scheduleSeat.seat, seat)
+                .where(scheduleSeat.schedule.id.eq(scheduleId))
+                .orderBy(seat.posY.asc(), seat.posX.asc())
+                .fetch();
+    }
+
+    /**
+     * 좌석 상태만 읽는다 (Task 036). 캐시하지 않는다.
+     *
+     * <p>{@code seats} 조인이 없고 정렬도 하지 않는다 — 순서는 캐시된 배치가 들고 있고, 이쪽은
+     * id로 찾아 쓰는 맵이라 순서가 의미 없다. 그래서 커버링 인덱스 없이도
+     * {@code uk_schedule_seats_schedule_seat}의 선두 컬럼으로 회차 범위가 좁혀진다.
+     */
+    @Override
+    public Map<Long, SeatStatus> findSeatStatusesByScheduleId(Long scheduleId) {
+        List<Tuple> rows = queryFactory
+                .select(scheduleSeat.id, scheduleSeat.status)
+                .from(scheduleSeat)
+                .where(scheduleSeat.schedule.id.eq(scheduleId))
+                .fetch();
+
+        // Tuple을 리포지토리 밖으로 내보내지 않는다 (CLAUDE.md 프로젝션 규칙).
+        // HashMap 초기 용량을 주는 이유: 2,000건이면 기본 용량 16에서 8번 리해시한다.
+        Map<Long, SeatStatus> statuses = new HashMap<>(Math.max(16, rows.size() * 2));
+        for (Tuple row : rows) {
+            statuses.put(row.get(scheduleSeat.id), row.get(scheduleSeat.status));
+        }
+        return statuses;
     }
 
     @Override

@@ -6,11 +6,13 @@
 # 010이 "QUEUE_EXPECTED=1을 끈 군에 넘기면 403이 조용히 통과한다"로 밟은 함정과 같은
 # 종류다. 010도 run-group.sh를 썼다고 기록했는데 그 파일은 커밋되지 않았다.
 #
-# 매 실행마다 네 가지를 같이 남긴다. 하나라도 빠지면 그 실행은 판정에 못 쓴다.
+# 매 실행마다 다섯 가지를 같이 남긴다. 하나라도 빠지면 그 실행은 판정에 못 쓴다.
 #   1) k6 요약 JSON            -> results/<tag>-<n>.json
 #   2) Postgres I/O 리포트     -> results/<tag>-<n>-dbio.txt   (06 리셋 -> 실행 -> 07 읽기)
 #   3) 백엔드 Hikari/heap CSV  -> results/<tag>-<n>-metrics.csv
 #   4) 워크로드 무결성 판정    -> results/<tag>-<n>-integrity.txt (check-run.py)
+#   5) 쿼리별 실행 시간        -> results/<tag>-<n>-pgss.txt    (Task 036. 09 읽기)
+#      확장이 없으면 에러 텍스트가 남는다 — sql/08을 한 번 돌려야 한다는 신호다.
 #
 # 쓰는 법:
 #   bash load-test/run-group.sh <tag> <script.js> <반복수> [k6 -e 인자들...]
@@ -93,6 +95,11 @@ for i in $(seq 0 "$REPEAT"); do
   fi
 
   $PSQL -f - < load-test/sql/07-db-io-report.sql > "$RESULTS/${name}-dbio.txt" 2>&1
+
+  # 쿼리별 실행 시간 (Task 036). 확장이 없으면 09가 에러를 뱉는데, 그 에러를 파일에
+  # 그대로 남기고 넘어간다 — 조용히 빈 파일을 만들면 "안 쌓였다"와 "안 돌았다"를
+  # 구분할 수 없다(교훈 1의 작은 판본. 통과했다는 신호와 일을 했다는 신호는 다르다).
+  $PSQL -f - < load-test/sql/09-pg-stat-report.sql > "$RESULTS/${name}-pgss.txt" 2>&1 || true
 
   python load-test/check-run.py ${PROFILE:+--profile "$PROFILE"} "$RESULTS/${name}.json" | tee "$RESULTS/${name}-integrity.txt" || true
   echo

@@ -1,12 +1,15 @@
 package com.tikkit.api.common.config;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.cache.support.NoOpCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.Ordered;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
@@ -17,6 +20,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -55,12 +59,68 @@ public class CacheConfig {
      * {@code AuthStrategyConfig}와 같은 방식이다 — 서비스 코드는 저장소를 모른다.
      */
     @Bean
+    @Primary
     public CacheManager cacheManager(CacheProperties properties,
                                      ObjectProvider<RedisConnectionFactory> connectionFactory) {
         return switch (properties.type()) {
             case NONE -> new NoOpCacheManager();
             case REDIS -> redisCacheManager(connectionFactory.getObject());
         };
+    }
+
+    /**
+     * 좌석맵 배치 전용 로컬 캐시 (Task 036).
+     *
+     * <h2>왜 CacheManager를 하나 더 두나</h2>
+     * 좌석맵과 카탈로그가 서로 다른 저장소로 가야 한다. 좌석맵은 2,000석에 337,885바이트라
+     * Redis 왕복·역직렬화가 쿼리보다 비쌌지만(029 기각) 같은 측정에서 <b>로컬 캐시는 가장
+     * 빨랐다</b>(6.63 → 4.98ms) — 직렬화도 네트워크도 없기 때문이다. 반대로 카탈로그는 수백
+     * 바이트라 로컬로 얻을 게 없고, 공연 파생값 evict가 {@code @SchedulerLock} 때문에 한
+     * 인스턴스에서만 돌아 로컬이면 반쪽만 적용된다.
+     * <p>
+     * 섞지 않는 또 하나의 이유는 측정이다. 군 사이에 카탈로그 캐시의 조건이 고정돼야 처리량
+     * 변화를 좌석맵에 귀속할 수 있다 — {@code cache.type}을 건드려 전부 로컬로 돌리면 그 귀속이
+     * 깨진다.
+     *
+     * <h2>왜 evict가 없나</h2>
+     * 캐시하는 것이 좌표·구역·행·번호·등급 id뿐이고 그 필드를 런타임에 바꾸는 경로가 없다.
+     * 그래서 TTL은 무효화 수단이 아니라 <b>안전망</b>이다 — 좌석 구성을 마이그레이션으로 바꿨을 때
+     * 재기동 없이 따라오게 하는 정도의 의미다. 상태는 캐시하지 않으므로 선점 직후 재조회에도
+     * 즉시 보인다({@code CacheQueryCountTest}가 그걸 고정한다).
+     *
+     * <h2>recordStats()를 켜는 이유</h2>
+     * Micrometer가 {@code cache.gets{result=hit|miss}}를 읽으려면 Caffeine이 통계를 기록해야 한다.
+     * 끄면 적중률이 영구히 비어서 "캐시가 프록시를 안 타고 있다"(008 3.1절의 자기호출 함정)를
+     * 적중률 0%로 발견할 수단이 없어진다.
+     *
+     * <h2>maximumSize는 운영 설정값이다 — 작업 집합보다 커야 한다</h2>
+     * 008이 로컬 캐시를 기각한 근거 중 "힙 용량"은 <b>유효했지만 방향이 반대였다.</b> 008은
+     * "상한에 묶인다"고 적었는데, 600회차를 200칸에 담은 군은 적중률 33.5%로 처리량 이득이
+     * +1.7%(산포 안)로 사라지면서 <b>힙은 오히려 더 썼다</b>(Old Gen 311 → 497MB) — 축출
+     * 52,768건이 만든 쓰레기다. 즉 상한을 줄이는 것으로 힙을 아낄 수 없다. 담거나 안 하거나다.
+     * <p>
+     * 그래서 이 값은 "동시에 조회되는 회차 수"보다 커야 하고, 회차당 약 420KB를 본다
+     * ({@code docs/improvements/014-seatmap-assembly-cost.md} 4.3절).
+     */
+    @Bean
+    public CacheManager seatmapCacheManager(CacheProperties properties) {
+        if (properties.seatmap() != CacheProperties.SeatmapStrategy.LOCAL) {
+            // 전략이 SINGLE이면 캐시 자체를 올리지 않는다. @Cacheable을 지우지 않고도
+            // 완전히 꺼지는 구조는 cache.type=none이 NoOpCacheManager를 올리는 것과 같다.
+            return new NoOpCacheManager();
+        }
+
+        CaffeineCacheManager manager = new CaffeineCacheManager();
+        manager.setCaffeine(Caffeine.newBuilder()
+                .maximumSize(properties.seatmapMaxEntries())
+                .expireAfterWrite(properties.seatmapTtl())
+                .recordStats());
+        // 선언한 이름만 쓴다. Redis 쪽 disableCreateOnMissingCache()와 같은 이유 —
+        // 오타로 새 캐시가 생기면 적중률 0%로만 나타난다.
+        manager.setCacheNames(List.of(CacheNames.SEAT_LAYOUT));
+        // 빈 결과는 @Cacheable(unless)로 걸러지므로 null을 담을 일이 없다.
+        manager.setAllowNullValues(false);
+        return manager;
     }
 
     /**

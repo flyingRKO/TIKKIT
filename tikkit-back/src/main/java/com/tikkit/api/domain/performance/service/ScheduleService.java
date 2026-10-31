@@ -1,21 +1,27 @@
 package com.tikkit.api.domain.performance.service;
 
+import com.tikkit.api.common.config.CacheProperties;
 import com.tikkit.api.common.exception.BusinessException;
 import com.tikkit.api.common.exception.ErrorCode;
+import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
 import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeRow;
+import com.tikkit.api.domain.performance.entity.SeatStatus;
 import com.tikkit.api.domain.performance.repository.ScheduleRepository;
 import com.tikkit.api.domain.performance.repository.ScheduleSeatRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 @Transactional(readOnly = true)
 public class ScheduleService {
@@ -34,15 +40,23 @@ public class ScheduleService {
     private final ScheduleRepository scheduleRepository;
     private final ScheduleSeatRepository scheduleSeatRepository;
     private final CatalogCache catalogCache;
+    private final SeatLayoutCache seatLayoutCache;
+    private final CacheProperties.SeatmapStrategy seatmapStrategy;
     private final Timer buildTimer;
 
     public ScheduleService(ScheduleRepository scheduleRepository,
                            ScheduleSeatRepository scheduleSeatRepository,
                            CatalogCache catalogCache,
+                           SeatLayoutCache seatLayoutCache,
+                           CacheProperties cacheProperties,
                            MeterRegistry meterRegistry) {
         this.scheduleRepository = scheduleRepository;
         this.scheduleSeatRepository = scheduleSeatRepository;
         this.catalogCache = catalogCache;
+        this.seatLayoutCache = seatLayoutCache;
+        // 전략을 필드에 복사해 둔다. 요청마다 프로퍼티를 다시 읽을 이유가 없고,
+        // 기동 후 바뀌지 않는 값이라는 것도 같이 드러난다 — 군을 바꾸려면 재기동한다.
+        this.seatmapStrategy = cacheProperties.seatmap();
         // 기동 시점에 미리 등록한다. 한 번도 기록되지 않은 미터는 시리즈가 없어서
         // Grafana가 "No data"를 띄우고, 그러면 0과 계측 없음을 구분할 수 없다
         // (Task 025의 registerAttemptCounters()와 같은 이유).
@@ -94,20 +108,68 @@ public class ScheduleService {
      * 회차의 모든 좌석을 평면 배열로 한 번에 내려준다. 큰 공연장이면 수천 건이라 응답이 수백 KB가 되는데,
      * 배치도는 어차피 전부 그려야 하므로 페이지를 쪼개는 게 의미가 없다.
      * <p>
-     * <b>Task 029: 캐시하지 않는다.</b> 응답 8필드 중 7개가 불변이라 그쪽만 캐시하고 상태는
+     * <b>Task 029: Redis 캐싱을 기각했다.</b> 응답 8필드 중 7개가 불변이라 그쪽만 캐시하고 상태는
      * 매번 읽는 구조를 만들어 실측했는데, 캐시 항목이 2,000석에 337,885바이트라서 Redis에서
      * 받아 역직렬화하는 비용이 이 쿼리 하나보다 비쌌다. 적중률 99.97%에서도 캐시를 켠 쪽이
-     * 느렸고, 그 비용은 좌석 수에 비례해 같이 커진다. 좌석맵의 확장성 해법은 캐싱이 아니라
-     * 응답 크기를 줄이는 것이고 그건 Task 030이 맡는다
-     * ({@code docs/improvements/008-caching.md} 4절).
+     * 느렸고, 그 비용은 좌석 수에 비례해 같이 커진다 ({@code docs/improvements/008-caching.md} 4절).
      * <p>
-     * 그래서 좌석 좌표는 공연장마다 고정이지만 상태와 함께 매번 조회한다.
+     * <b>Task 036: 로컬 캐시는 포화 구간에서 뒤집혔다 — 채택했다.</b> 008 4.2절이 "DB가 포화에
+     * 가까워지면 DB를 안 가는 것 자체의 가치가 올라간다"를 반례 조건으로 남겼고, 040이 벽을
+     * postgres CPU 4코어로 특정해 그 조건을 측정으로 세웠다. 실측은
+     * <b>768.6 → 995.1 req/s(+29.5%), postgres CPU 390.1% → 144.6%(-62.9%)</b>이고, DB 내부
+     * 실행 시간이 요청당 14.85 → 1.98ms다({@code docs/improvements/014-seatmap-assembly-cost.md}).
+     * <p>
+     * 기각된 것은 "큰 값을 Redis에 두는 것"이고 그 기각은 유지된다. 로컬이 이기는 이유는
+     * 직렬화도 네트워크도 없다는 것이고, 여기서는 담는 것이 불변 필드뿐이라 evict도 필요 없다.
+     * <p>
+     * <b>기본값은 단일 쿼리로 둔다</b> — 채택한 뒤에도 기준선을 다시 잴 수 있어야 한다
+     * ({@code cache.type}을 {@code none}으로 둔 것과 같은 이유).
      */
     public List<ScheduleSeatResponse> getSeats(Long scheduleId) {
         return buildTimer.record(() -> {
             requireScheduleExists(scheduleId);
-            return scheduleSeatRepository.findSeatResponsesByScheduleId(scheduleId);
+            return switch (seatmapStrategy) {
+                case SINGLE -> scheduleSeatRepository.findSeatResponsesByScheduleId(scheduleId);
+                case LOCAL -> assembleFromLayout(scheduleId);
+            };
         });
+    }
+
+    /**
+     * 캐시된 배치에 실시간 상태를 합쳐 좌석맵 응답을 만든다 (Task 036).
+     *
+     * <p>순서는 배치가 들고 있다({@code ORDER BY pos_y, pos_x}로 조회했고 캐시에 그대로 들어간다).
+     * 상태 맵은 id로 찾기만 하므로 정렬하지 않는다.
+     *
+     * <p>상태 맵에 없는 좌석은 응답에서 뺀다. 좌석 구성이 바뀌지 않는 한 일어나지 않는 경우이고
+     * (그래서 이 캐시에 evict가 없다), 일어났다면 캐시가 낡은 것이다 — <b>조용히 넘기지 않고
+     * 경고를 남긴다.</b> 반증된 가정을 코드에 남겨두면 다음 사람이 그걸 근거로 움직인다
+     * ({@code docs/improvements/README.md} 교훈 4).
+     */
+    private List<ScheduleSeatResponse> assembleFromLayout(Long scheduleId) {
+        List<ScheduleSeatLayoutRow> layout = seatLayoutCache.layout(scheduleId);
+        if (layout.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, SeatStatus> statuses = scheduleSeatRepository.findSeatStatusesByScheduleId(scheduleId);
+
+        List<ScheduleSeatResponse> seats = new ArrayList<>(layout.size());
+        for (ScheduleSeatLayoutRow row : layout) {
+            SeatStatus status = statuses.get(row.scheduleSeatId());
+            if (status == null) {
+                continue;
+            }
+            seats.add(new ScheduleSeatResponse(row.scheduleSeatId(), row.section(), row.rowLabel(),
+                    row.seatNumber(), row.posX(), row.posY(), status, row.ticketGradeId()));
+        }
+
+        if (seats.size() != layout.size()) {
+            log.warn("좌석맵 캐시가 현재 좌석 구성과 어긋난다 — scheduleId={}, 캐시 {}건, 응답 {}건. "
+                            + "좌표·등급을 바꾸는 경로가 생겼다면 이 캐시에 무효화가 필요하다",
+                    scheduleId, layout.size(), seats.size());
+        }
+        return seats;
     }
 
     private void requireScheduleExists(Long scheduleId) {

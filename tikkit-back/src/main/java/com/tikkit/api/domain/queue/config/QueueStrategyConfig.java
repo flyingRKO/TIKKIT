@@ -51,9 +51,9 @@ public class QueueStrategyConfig {
      * {@code @ConditionalOnBean}을 피한 것과 같은 이유). {@code getIfAvailable()}은 지연 해석이라
      * 순서와 무관하다.
      *
-     * <p>{@code CacheProperties}처럼 enum을 쓰지 않고 boolean인 이유: 캐시 저장소는 Caffeine을
-     * 넣어 비교했던 이력이 있어 선택지가 늘어날 자리였지만, 대기열은 ZSET이 전제라 Redis 외의
-     * 구현이 있을 수 없다.
+     * <p>{@code CacheProperties}처럼 enum을 쓰지 않고 boolean인 이유: 캐시 쪽은 저장소와 좌석맵
+     * 전략 모두 선택지가 늘어난 자리였지만(Redis·로컬 비교, Task 029·036), 대기열은 ZSET이
+     * 전제라 Redis 외의 구현이 있을 수 없다.
      */
     @Bean
     public QueueGateway queueGateway(ObjectProvider<RedisQueueGateway> redisQueueGateway) {

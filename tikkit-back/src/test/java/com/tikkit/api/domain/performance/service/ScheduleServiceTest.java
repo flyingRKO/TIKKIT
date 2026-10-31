@@ -1,7 +1,9 @@
 package com.tikkit.api.domain.performance.service;
 
+import com.tikkit.api.common.config.CacheProperties;
 import com.tikkit.api.common.exception.BusinessException;
 import com.tikkit.api.common.exception.ErrorCode;
+import com.tikkit.api.domain.performance.dto.ScheduleSeatLayoutRow;
 import com.tikkit.api.domain.performance.dto.ScheduleSeatResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeResponse;
 import com.tikkit.api.domain.performance.dto.TicketGradeRow;
@@ -46,6 +48,21 @@ class ScheduleServiceTest {
      */
     @Mock
     private CatalogCache catalogCache;
+
+    /**
+     * 좌석 배치(불변)만 캐시하는 계층 (Task 036). 기본 전략이 단일 쿼리라 아래 대부분의
+     * 테스트에서는 쓰이지 않고, 조립 경로를 보는 테스트만 직접 전략을 바꿔 쓴다.
+     */
+    @Mock
+    private SeatLayoutCache seatLayoutCache;
+
+    /**
+     * 좌석맵 전략을 들고 있다 (Task 036). 기본값 {@code SINGLE}이라 기존 테스트는 그대로다 —
+     * 측정 before가 사라지지 않게 기본을 단일 쿼리로 둔 결정이 여기서도 그대로 드러난다.
+     */
+    @Spy
+    private CacheProperties cacheProperties = new CacheProperties(
+            CacheProperties.CacheType.NONE, CacheProperties.SeatmapStrategy.SINGLE, 0, null);
 
     /**
      * 좌석맵 생성 시간 Timer(Task 029)를 만들려면 실제 레지스트리가 필요하다.
@@ -152,5 +169,72 @@ class ScheduleServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.NOT_FOUND);
         verify(scheduleSeatRepository, never()).findSeatResponsesByScheduleId(7L);
+    }
+
+    /**
+     * 좌석맵 전략만 {@code LOCAL}로 바꾼 서비스. 전략이 생성자에서 필드로 굳으므로
+     * ({@code ScheduleService} 생성자 주석) 인스턴스를 따로 만든다.
+     */
+    private ScheduleService localStrategyService() {
+        return new ScheduleService(scheduleRepository, scheduleSeatRepository, catalogCache, seatLayoutCache,
+                new CacheProperties(CacheProperties.CacheType.NONE,
+                        CacheProperties.SeatmapStrategy.LOCAL, 0, null),
+                meterRegistry);
+    }
+
+    @Test
+    @DisplayName("로컬 전략은 캐시된 배치에 실시간 상태를 합친다 — 상태는 캐시에서 오지 않는다")
+    void 로컬_전략_조립() {
+        // given: 배치는 캐시가, 상태는 DB가 들고 있다. 이 분담이 Task 036 설계의 전부다 —
+        // 상태까지 캐시하면 팔린 좌석이 TTL 동안 "선택 가능"으로 보인다.
+        given(scheduleRepository.existsById(7L)).willReturn(true);
+        given(seatLayoutCache.layout(7L)).willReturn(List.of(
+                new ScheduleSeatLayoutRow(100L, "A", "1", 1, 1, 1, 10L),
+                new ScheduleSeatLayoutRow(101L, "A", "1", 2, 2, 1, 10L)));
+        given(scheduleSeatRepository.findSeatStatusesByScheduleId(7L)).willReturn(Map.of(
+                100L, SeatStatus.AVAILABLE,
+                101L, SeatStatus.HELD));
+
+        // when
+        List<ScheduleSeatResponse> result = localStrategyService().getSeats(7L);
+
+        // then: 순서는 배치가 정한다(DB가 pos_y, pos_x로 정렬해 캐시에 넣었다).
+        assertThat(result).extracting(ScheduleSeatResponse::id).containsExactly(100L, 101L);
+        assertThat(result).extracting(ScheduleSeatResponse::status)
+                .containsExactly(SeatStatus.AVAILABLE, SeatStatus.HELD);
+        // 단일 쿼리는 타지 않아야 한다 — 타면 분리의 의미가 없고 왕복이 3이 된다.
+        verify(scheduleSeatRepository, never()).findSeatResponsesByScheduleId(7L);
+    }
+
+    @Test
+    @DisplayName("캐시된 배치에만 있는 좌석은 응답에서 뺀다 — 없는 좌석을 AVAILABLE로 내려주지 않는다")
+    void 로컬_전략_캐시_불일치() {
+        // 좌표·등급을 바꾸는 코드 경로가 없어서 실제로는 일어나지 않는 상태다(그래서 이 캐시에
+        // evict가 없다). 그 가정이 틀렸을 때 **조용히 틀리지 않는지**를 고정한다 — 상태를
+        // 기본값으로 채우면 이미 없는 좌석이 선택 가능으로 보이고, 사용자는 클릭해서야 안다.
+        // 통합 테스트로는 만들 수 없는 조건이라 여기서만 잡힌다.
+        given(scheduleRepository.existsById(7L)).willReturn(true);
+        given(seatLayoutCache.layout(7L)).willReturn(List.of(
+                new ScheduleSeatLayoutRow(100L, "A", "1", 1, 1, 1, 10L),
+                new ScheduleSeatLayoutRow(101L, "A", "1", 2, 2, 1, 10L)));
+        given(scheduleSeatRepository.findSeatStatusesByScheduleId(7L))
+                .willReturn(Map.of(100L, SeatStatus.AVAILABLE));
+
+        // when
+        List<ScheduleSeatResponse> result = localStrategyService().getSeats(7L);
+
+        // then
+        assertThat(result).extracting(ScheduleSeatResponse::id).containsExactly(100L);
+    }
+
+    @Test
+    @DisplayName("로컬 전략에서도 없는 회차는 NOT_FOUND다 — 조립 경로가 존재 확인을 건너뛰지 않는다")
+    void 로컬_전략_존재하지_않는_회차() {
+        given(scheduleRepository.existsById(7L)).willReturn(false);
+
+        assertThatThrownBy(() -> localStrategyService().getSeats(7L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.NOT_FOUND);
+        verifyNoInteractions(seatLayoutCache);
     }
 }

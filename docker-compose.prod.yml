@@ -41,6 +41,25 @@ x-backend-env: &backend-env
   # 적중률 99.97%에서도 캐시를 켠 쪽이 느렸다 (docs/improvements/008-caching.md 4절).
   CACHE_TYPE: ${CACHE_TYPE:-none}
 
+  # 좌석맵 조회 전략 (Task 036). single | local
+  #
+  # **local이 채택안이다** - 포화 768.6 -> 995.1 req/s(+29.5%)에 postgres CPU가
+  # 390.1% -> 144.6%(-62.9%)다. 적중률 99.4%, DB 내부 실행 시간이 요청당 14.85 -> 1.98ms.
+  # 029가 Redis로 기각한 것과 결론이 다른 이유는 저장소다(로컬에는 직렬화도 왕복도 없다).
+  #
+  # 기본값을 single로 두는 이유는 CACHE_TYPE과 같다 - 기준선을 다시 잴 수 있어야 한다.
+  # 측정·운영에서는 SEATMAP_STRATEGY=local로 띄운 뒤 nginx를 재시작한다.
+  #
+  # CACHE_TYPE과 별개인 이유: 군 사이에 카탈로그 캐시의 조건이 고정돼야 처리량 변화를
+  # 좌석맵에 귀속할 수 있다. 실제로 이 분리 덕에 "분리 손해 -8.2%"와 "캐시 이득 +29.5%"를
+  # 따로 적을 수 있었다.
+  SEATMAP_STRATEGY: ${SEATMAP_STRATEGY:-single}
+
+  # 보관할 회차 수 상한. **작업 집합보다 커야 한다** - 600회차를 200칸에 담은 군은
+  # 적중률 33.5%에 +1.7%(산포 안)로 이득이 사라졌고, 축출 52,768건이 만든 쓰레기 때문에
+  # 힙을 오히려 더 썼다(311 -> 497MB). 상한을 줄여서 힙을 아낄 수 없다. 회차당 약 420KB다.
+  SEATMAP_MAX_ENTRIES: ${SEATMAP_MAX_ENTRIES:-1000}
+
   # 대기열 (Task 031). true면 RedisQueueGateway가 올라가 좌석 조회·예매 선점에 입장권을 요구한다.
   #
   # 기본값을 false로 둔다 — CACHE_TYPE과 같은 이유다. 대기열은 "유무에 따른 before/after"를
@@ -111,12 +130,26 @@ services:
     # track_io_timing은 pg_stat_database.blk_read_time을 쓰려면 켜야 한다 — 읽은 페이지 수와
     # 읽기에 쓴 시간은 다른 값이고, 007이 "버퍼 접근 수는 I/O의 대리지표가 아니다"로
     # 한 번 속은 자리라 시간 쪽을 직접 본다.
+    #
+    # pg_stat_statements는 Task 036이 켰다. 040이 포화 구간의 벽을 postgres CPU
+    # 400%(4코어)로 특정했지만 프로세스 단위까지만 쪼갰고, 어느 쿼리가 그 4코어를 먹는지는
+    # 못 봤다(012 8절이 "Task 036의 입구다"라고 적었다). shared_preload_libraries는
+    # 재시작이 필요해서 CONFIG SET으로 못 켠다 — shared_buffers와 같은 이유로 여기 있다.
+    #
+    # track=all은 중첩 문장(함수·CTE 안쪽)까지 센다. top은 최상위만 세는데, 좌석맵의
+    # 비용이 어느 층에 있는지를 모르는 상태에서 top을 고르면 "안 보이는 것"과 "없는 것"을
+    # 구분할 수 없다. 켜 두는 쪽이 오버헤드를 조금 더 내지만 before/after 양쪽에 같이
+    # 걸리므로 군 사이 비교는 그대로 성립한다.
     command:
       - postgres
       - -c
       - shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}
       - -c
       - track_io_timing=on
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
