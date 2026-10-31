@@ -14,6 +14,9 @@
 #   5) 쿼리별 실행 시간        -> results/<tag>-<n>-pgss.txt    (Task 036. 09 읽기)
 #      확장이 없으면 에러 텍스트가 남는다 — sql/08을 한 번 돌려야 한다는 신호다.
 #   6) nginx 로그 집계         -> results/<tag>-<n>-nginx.txt   (Task 039)
+#
+# 그리고 군 시작 전에 **적용된** 설정을 찍는다 — DB는 current_setting, 컨테이너는 env다.
+# 준 값과 적용된 값이 다른 사고를 033·036·039에서 세 번 겪었다.
 #      no live upstreams / 임시파일 버퍼링 / 502·504 건수. 036에서 이게 없어서 각 군
 #      3회차가 전부 502인 것을 **사후에 손으로** 찾았다 (014 4.7절).
 #
@@ -65,6 +68,47 @@ mkdir -p "$RESULTS"
 # 사후에 구분할 수 있는 유일한 방법이다.
 echo "=== 군 $TAG ==="
 $PSQL -c "select current_setting('shared_buffers') shared_buffers, current_setting('track_io_timing') io_timing;"
+
+# 군을 구분하는 애플리케이션 토글은 **준 값이 아니라 적용된 값**을 읽는다 (Task 039).
+#
+# 여기 DB 설정만 찍고 토글을 안 찍은 게 공백이었다. 039에서 `.env`에 앞 Task가 남긴
+# `SEATMAP_STRATEGY=local` 때문에 **`single` 군이라고 믿고 `local`을 쟀다** — 처음 나온
+# 988~1,000 req/s를 그대로 믿었으면 "nginx 수정이 768 → 995로 올렸다"는 틀린 결론이 됐다.
+# compose 기본값이 `${SEATMAP_STRATEGY:-single}`인데 `.env`가 그 기본값을 덮고, 덮는 층이
+# 셋이라(기본값 → `.env` → 셸) 어느 쪽이 이기는지는 값마다 다르다.
+#
+# 033이 밟은 함정도 같은 모양이었다(셸 환경변수가 `.env`를 덮어 "껐다고 믿으며 켜진 상태"를
+# 쟀다). 036은 `pg_stat_statements`에서 같은 일을 겪고 `SHOW`로 확인하는 습관을 남겼는데,
+# 그 습관의 적용 범위가 DB뿐이었다. **컨테이너는 `env`로 읽는다.**
+#
+# BE 2대를 따로 찍는 이유: 둘이 같은 anchor(*backend-env)를 쓰므로 보통은 같지만,
+# **한쪽만 재생성하면 조건이 갈린다.** 갈린 상태로 재면 그 군은 두 설정의 평균이 되고,
+# 측정 중에는 그걸 알 방법이 없다.
+TOGGLE_KEYS='^(SEATMAP_STRATEGY|SEATMAP_MAX_ENTRIES|CACHE_TYPE|QUEUE_ENABLED)='
+
+toggles_of() {
+  cid="$($COMPOSE ps -q "$1" 2>/dev/null | head -1)"
+  if [ -z "$cid" ]; then
+    echo "(실행 중이 아니다)"
+    return
+  fi
+  # grep이 한 건도 못 찾으면 pipefail 때문에 함수가 실패하고 set -e가 스크립트를 죽인다.
+  docker exec "$cid" env 2>/dev/null | grep -E "$TOGGLE_KEYS" | sort | tr '\n' ' ' || true
+}
+
+be1_toggles="$(toggles_of backend1)"
+be2_toggles="$(toggles_of backend2)"
+echo "backend1 토글: $be1_toggles"
+echo "backend2 토글: $be2_toggles"
+
+# 비어 있는 것은 "토글이 없다"가 아니라 "못 읽었다"다. 둘을 구분해서 찍는다 —
+# 빈 결과를 정상으로 읽는 함정은 nginx 로그 집계에서도 같이 막았다(009 6.2절).
+if [ "$be1_toggles" = "(실행 중이 아니다)" ] || [ -z "${be1_toggles// /}" ]; then
+  echo "경고: 토글을 읽지 못했다. 스택이 떠 있는지 확인한다 — 이 군은 조건을 증명할 수 없다"
+elif [ "$be1_toggles" != "$be2_toggles" ]; then
+  echo "경고: BE 2대의 토글이 다르다 — 한쪽만 재생성된 상태로 재고 있다"
+fi
+
 echo "k6 인자: $*"
 echo
 
