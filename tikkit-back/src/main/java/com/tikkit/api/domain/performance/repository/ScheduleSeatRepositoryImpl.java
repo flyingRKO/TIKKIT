@@ -34,6 +34,20 @@ public class ScheduleSeatRepositoryImpl implements ScheduleSeatRepositoryCustom 
      * 캐시 항목이 337,885바이트라 받아서 2,000개 record로 역직렬화하는 비용이 이 쿼리를 넘는다.
      * <b>적중률 99.97%에서도 그랬다.</b> 그래서 단일 쿼리로 되돌렸다
      * ({@code docs/improvements/008-caching.md} 4절).
+     * <p>
+     * Task 040이 이 쿼리의 비용 구성을 한 겹 더 벗겼다. 작업 집합을 {@code shared_buffers}
+     * 밖으로 밀어(회차 600개, 183MB) 디스크 읽기를 요청당 9.8페이지로 만든 다음
+     * {@code shared_buffers}를 512MB·1GB로 올려 <b>0으로 되돌렸는데 포화 처리량이 775 → 768 →
+     * 766 req/s로 안 움직였다</b>(9회 산포 736~796 안). 커버링 인덱스
+     * {@code (schedule_id) INCLUDE (seat_id, status, ticket_grade_id)}도 같은 결과다 — 요청당
+     * 버퍼 접근을 1,409 → 189회(-86.6%)로 줄이는데 처리량 +3.1%가 산포 안이고, 그 대가가
+     * 338MB와 HOT 파괴다. <b>이제 그 기각에는 "지금 규모에서"라는 조건이 붙지 않는다.</b>
+     * <p>
+     * 대신 포화 구간 CPU가 <b>postgres 400%(4.0코어) vs BE 2대 합계 271%</b>로 나왔다. 즉 이
+     * 쿼리를 더 빠르게 하려면 줄여야 하는 것이 I/O나 버퍼 접근이 아니라 <b>Postgres CPU</b>이고,
+     * 그건 2,000행 튜플 구성과 237KB 전송이다. Task 036이 로컬 캐시를 보더라도 "DB 조회가
+     * 빨라져서"가 아니라 "Postgres CPU를 아예 안 쓰게 해서" 이득이 나오는 구조로 재야 한다
+     * ({@code docs/improvements/012-shared-buffers-retrial.md} 4.3·4.4·4.6절).
      */
     @Override
     public List<ScheduleSeatResponse> findSeatResponsesByScheduleId(Long scheduleId) {
