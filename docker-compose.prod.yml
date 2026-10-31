@@ -41,6 +41,19 @@ x-backend-env: &backend-env
   # 적중률 99.97%에서도 캐시를 켠 쪽이 느렸다 (docs/improvements/008-caching.md 4절).
   CACHE_TYPE: ${CACHE_TYPE:-none}
 
+  # 좌석맵 조회 전략 (Task 036). single | split | local — 측정 군 A·B·C다.
+  #
+  # CACHE_TYPE과 별개인 이유: 군 사이에 카탈로그 캐시의 조건이 고정돼야 처리량 변화를
+  # 좌석맵에 귀속할 수 있다. 한 토글로 묶으면 "좌석맵 캐시를 켰다"가 "카탈로그 캐시도
+  # 로컬로 바꿨다"를 같이 하게 되고, 그러면 040이 9회 산포로 확인한 ±4% 안에서
+  # 무엇이 무엇을 했는지 가를 수 없다.
+  #
+  # split이 왜 있나: 분리 자체가 순손실(6.63 -> 8.62ms)이라서, 캐시 이득을 그 손해와
+  # 갈라 귀속하려면 중간 점이 필요하다. 035가 군을 둘로 나눠 "레이어 분리가 전부 했다"로
+  # 틀리게 적는 것을 막은 것과 같은 이유다.
+  SEATMAP_STRATEGY: ${SEATMAP_STRATEGY:-single}
+  SEATMAP_MAX_ENTRIES: ${SEATMAP_MAX_ENTRIES:-200}
+
   # 대기열 (Task 031). true면 RedisQueueGateway가 올라가 좌석 조회·예매 선점에 입장권을 요구한다.
   #
   # 기본값을 false로 둔다 — CACHE_TYPE과 같은 이유다. 대기열은 "유무에 따른 before/after"를

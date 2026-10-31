@@ -88,8 +88,13 @@ dependencies {
     // spring.cache.* 바인딩과 CacheManager 자동설정이 아예 안 올라온다.
     // RedisCacheManager는 spring-data-redis(세션 스타터가 끌고 온다) 안에 이미 있다.
     implementation 'org.springframework.boot:spring-boot-starter-cache'
-    // Caffeine(로컬 캐시)도 같은 추상화 위에서 비교했고 기각해서 의존성을 뺐다 —
-    // 근거는 docs/improvements/008-caching.md 4절과 CacheProperties Javadoc.
+    // Caffeine(로컬 캐시)은 Task 029에서 비교하고 기각해 의존성을 뺐다가, Task 036이
+    // 되살렸다. 029의 기각은 저부하 p95 기준으로 "가장 빨랐지만"(6.63 -> 4.98ms) 힙 용량과
+    // 분산 evict 때문이었고, 036은 포화 구간에서 그 판단이 뒤집히는지를 본다 —
+    // 040이 벽을 postgres CPU 4코어로 특정했고, 008 4.2절이 "DB가 포화에 가까워지면
+    // DB를 안 가는 것 자체의 가치가 올라간다"를 반례 조건으로 남겨 뒀다.
+    // 근거는 docs/improvements/008-caching.md 4절, 012-shared-buffers-retrial.md 4.4절.
+    implementation 'com.github.ben-manes.caffeine:caffeine'
 
     // 모니터링 (Task 025). starter-actuator가 spring-boot-starter-micrometer-metrics까지
     // 끌고 오므로 메트릭 스타터를 따로 선언하지 않는다.

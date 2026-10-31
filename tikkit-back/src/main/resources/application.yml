@@ -125,6 +125,36 @@ tikkit:
   cache:
     type: ${CACHE_TYPE:none}
 
+    # 좌석맵 조회 전략 (Task 036). single | split | local
+    #
+    # 세 값이 측정 군 A·B·C다. 기본값 single은 현행 단일 쿼리이고, before가 사라지지 않게
+    # 기본으로 둔다 - CACHE_TYPE·QUEUE_ENABLED와 같은 이유다.
+    #
+    #   single  단일 쿼리. 좌석맵 p95 6.63ms / 포화 775 req/s (008 4.1절, 012 7.1절)
+    #   split   배치·상태 두 쿼리로 분리, 캐시 없음. **순손실이다**(8.62ms, +30%).
+    #           분리 손해와 캐시 이득을 갈라 귀속하기 위한 측정 군으로만 존재한다
+    #   local   분리 + 배치를 Caffeine에 둔다. 저부하 4.98ms / 적중률 97.0% (008 4.1절)
+    #
+    # 왜 다시 재는가: 029는 저부하 p95로 "로컬이 가장 빠르다"까지 쟀지만 힙 용량과 분산
+    # evict 때문에 안 골랐다. 이 캐시는 불변 필드만 담아서 evict가 필요 없고, 남은 질문은
+    # 포화 구간이다 - 008 4.2절이 "DB가 포화에 가까워지면 뒤집힐 수 있다"를 반례 조건으로
+    # 남겼고 040이 벽을 postgres CPU 4코어로 특정했다.
+    #
+    # 판정이 끝나면 이 토글은 사라진다. 채택이면 고른 전략만 남기고 기각이면 전부 되돌린다
+    # (improvements/README.md 교훈 5).
+    seatmap: ${SEATMAP_STRATEGY:single}
+
+    # 좌석맵 로컬 캐시가 보관할 회차 수 상한. 008이 든 기각 근거 중 "힙 용량"이 아직
+    # 유효해서 측정 축으로 뺐다 - 2,000석 회차 하나가 Redis 직렬화 기준 337,885바이트였고,
+    # 008은 회차 3,000개면 1.15GB라고 적었다. LRU가 핫한 회차만 남기므로 그 근거를
+    # 정책으로 다룰 수 있는지를 이 값으로 잰다.
+    seatmap-max-entries: ${SEATMAP_MAX_ENTRIES:200}
+
+    # 좌석맵 로컬 캐시 TTL. 캐시 대상이 불변이라 무효화용이 아니라 **안전망**이다 -
+    # 좌석 구성을 마이그레이션으로 바꿨을 때 재기동 없이 따라오게 하는 정도의 의미다.
+    # gradePrices의 10분과 같은 성격이다.
+    seatmap-ttl: ${SEATMAP_TTL:10m}
+
   # 대기열 (Task 031). ZSET 기반 입장 제어.
   #
   # 기본값 false인 이유는 session-store=memory, cache.type=none과 같다: Redis 없이도 기동·테스트가

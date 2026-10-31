@@ -69,10 +69,16 @@ public class ReservationExpiryScheduler {
      * 주기는 드물다.
      *
      * <h2>로컬 캐시에서는 이게 반쪽짜리다</h2>
-     * 이 배치는 {@code @SchedulerLock}으로 <b>한 인스턴스에서만</b> 돈다. 그래서 캐시가 JVM 로컬
-     * ({@code tikkit.cache.type=caffeine})이면 evict도 그 인스턴스에만 적용되고, 다른 BE는 TTL
-     * 60초가 끝날 때까지 옛 {@code status}를 내려준다. Redis 공유 캐시면 한 번의 evict가 전체에
-     * 반영된다 — 두 저장소의 차이가 성능이 아니라 <b>정합성</b>에서 먼저 드러나는 지점이다.
+     * 이 배치는 {@code @SchedulerLock}으로 <b>한 인스턴스에서만</b> 돈다. 그래서 공연 파생값
+     * 캐시가 JVM 로컬이면 evict도 그 인스턴스에만 적용되고, 다른 BE는 TTL 60초가 끝날 때까지 옛
+     * {@code status}를 내려준다. Redis 공유 캐시면 한 번의 evict가 전체에 반영된다 —
+     * 두 저장소의 차이가 성능이 아니라 <b>정합성</b>에서 먼저 드러나는 지점이다. 그래서
+     * {@code tikkit.cache.type}에는 로컬 선택지가 없다.
+     *
+     * <p><b>Task 036이 좌석맵에 로컬 캐시를 넣었지만 이 문단은 그대로 성립한다.</b> 그 캐시는
+     * 불변 필드({@code seatLayout})만 담아서 evict 자체가 없고, 이 배치가 비우는 것은 공연
+     * 파생값뿐이다 — 두 캐시가 서로 다른 {@code CacheManager}에 있는 이유가 이것이다
+     * ({@code CacheConfig.seatmapCacheManager} Javadoc).
      *
      * <p>{@code CacheManager}를 직접 쓰므로 {@code type=none}일 때도 안전하다 —
      * {@code NoOpCacheManager}가 이름마다 빈 캐시를 돌려준다.
