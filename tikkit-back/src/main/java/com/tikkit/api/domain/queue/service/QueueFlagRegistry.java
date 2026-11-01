@@ -4,6 +4,8 @@ import com.tikkit.api.domain.performance.repository.ScheduleRepository;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -59,7 +61,17 @@ public class QueueFlagRegistry {
         return current().ids().contains(scheduleId);
     }
 
-    /** 대기열이 켜진 회차 전부. 입장 스케줄러가 순회한다. */
+    /**
+     * 대기열이 켜진 회차 전부. 입장 스케줄러가 순회한다.
+     * <p>
+     * <b>순회 순서가 id 오름차순으로 고정돼 있다(Task 037).</b> 스케줄러가 전역 예산을 순회하며
+     * 이어받으므로 앞 회차가 예산을 다 먹을 수 있는데, {@code Set.copyOf}의 해시 순서로 두면
+     * 그 편향이 결정적이면서도 <b>설명할 수 없다</b> — "왜 저 회차만 들어가나"에 답하려면
+     * 해시값을 계산해 봐야 한다. 편향을 없애지는 못하지만 예측 가능하게 만든다.
+     * <p>
+     * 정렬을 쿼리가 아니라 여기서 하는 이유: 이 순서는 <b>입장 정책</b>이라 대기열 쪽 계약이고,
+     * 쿼리에 {@code order by}를 넣으면 다음 사람이 그걸 지우면서 정책이 조용히 사라진다.
+     */
     public Set<Long> enabledScheduleIds() {
         return current().ids();
     }
@@ -81,14 +93,26 @@ public class QueueFlagRegistry {
             return cached;
         }
         List<Long> ids = scheduleRepository.findQueueEnabledScheduleIds();
-        Snapshot reloaded = new Snapshot(Set.copyOf(ids), Instant.now());
+        Snapshot reloaded = new Snapshot(orderedById(ids), Instant.now());
         snapshot = reloaded;
         return reloaded;
     }
 
+    /**
+     * id 오름차순 {@code LinkedHashSet}. {@code contains}는 그대로 O(1)이고 순회 순서만 고정된다 —
+     * {@code enabled(long)}이 요청 경로에서 {@code contains}를 쓰므로 {@code List}로 바꿀 수 없다.
+     */
+    private static Set<Long> orderedById(List<Long> ids) {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(ids.stream().sorted().toList()));
+    }
+
     private record Snapshot(Set<Long> ids, Instant loadedAt) {
 
-        /** 아직 한 번도 읽지 않은 상태. {@code EPOCH}라 항상 만료로 판정된다. */
+        /**
+         * 아직 한 번도 읽지 않은 상태. {@code EPOCH}라 항상 만료로 판정된다.
+         * <p>
+         * {@code ids}는 비어 있으므로 순서 계약과 무관하다.
+         */
         static Snapshot stale() {
             return new Snapshot(Set.of(), Instant.EPOCH);
         }

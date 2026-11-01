@@ -4,17 +4,22 @@
 -- 바꾸는 값이다. 01~02 시드가 만드는 회차는 3,000개인데, **전부 켜면 측정이 성립하지 않는다.**
 --
 -- ── 왜 전부 켜면 안 되는가 ────────────────────────────────────────────────────
--- 1) admit-batch-size는 전역이 아니라 **회차당** 값이다. QueueAdmissionScheduler.run()이
---    enabledScheduleIds()를 전부 순회하면서 회차마다 admitBatch()를 돌리므로,
---    초당 입장 인원 = admit-batch-size x 켠 회차 수 / admit-interval
---    이다. 3,000회차를 켜면 batch=50에서 초당 150,000명이 입장하고, 대기열은 아무것도 막지
---    않는다. "대기열을 켰는데 효과가 없다"로 보이고 원인이 설정값에 안 적혀 있다.
--- 2) 틱마다 회차당 Redis 왕복이 3회다(만료 수거 / 선두 조회 / 대기 인원). 3,000회차면
---    1초 안에 왕복 9,000회를 해야 하고, 못 끝내면 fixedDelay가 밀려 입장 주기가 늘어난다.
---    즉 부하 생성기가 아니라 **입장 배치 자체가 측정 대상을 흔든다.**
+-- 1) ~~admit-batch-size가 회차당이라 켠 회차 수에 비례해 입장 속도가 올라간다~~
+--    **Task 037이 닫았다.** 이제 admit-rate-per-second가 **전역** 초당 입장 인원이고,
+--    스케줄러가 틱마다 그 예산을 들고 회차를 순회하며 쓴 만큼 깎는다. 켠 회차가 3,000개여도
+--    초당 입장 인원은 설정값 그대로다.
+--    (전에는 초당 입장 인원 = admit-batch-size x 켠 회차 수 / admit-interval 이어서
+--     3,000회차 x batch 50 = 초당 150,000명이 입장했고, 대기열이 아무것도 막지 않았다.
+--     "대기열을 켰는데 효과가 없다"로 보이면서 원인이 설정값에 안 적혀 있었다.)
+-- 2) **이것은 그대로 남아 있다.** 틱마다 회차당 Redis 왕복이 3회다(만료 수거 / 선두 조회 /
+--    대기 인원). 3,000회차면 1초 안에 왕복 9,000회를 해야 하고, 못 끝내면 fixedDelay가 밀려
+--    입장 주기가 늘어난다. 즉 부하 생성기가 아니라 **입장 배치 자체가 측정 대상을 흔든다.**
+--    Task 037이 완화하기는 했다 — 예산이 소진되면 뒤 회차는 선두 조회(ZRANGE)를 아예 돌지
+--    않으므로 회차당 왕복이 3회에서 2회로 줄어든다. 그래도 회차 수에 비례하는 것은 같다.
 --
--- 그래서 기본값이 **1회차**다. 그러면 초당 입장 인원 = admit-batch-size 로 1:1 대응이 되고,
--- 배치 크기를 스윕하는 측정이 그대로 해석된다.
+-- 그래서 기본값이 **1회차**다. 이유가 Task 037로 하나 줄었다 — 입장 속도 해석 때문이 아니라
+-- 위 2)번(배치 자체의 Redis 왕복)과 아래 재고 조건 때문이다. **다회차 군을 이제 돌릴 수 있고,
+-- 그게 Task 037의 회귀 확인 군이다** — 회차를 N개 켜도 입장 속도가 설정값과 1:1인지 본다.
 --
 -- ★ 1회차로 두려면 시드를 01c-large-venue.sql로 깔아야 한다 ★
 --   01-bulk-catalog(회차 3,000개 x 2,000석)에서 1회차만 켜면 재고 2,000석이 수십 초에
@@ -53,7 +58,10 @@
 -- 회차 수를 바꾸려면 psql 변수로 넘긴다 (01 시드에서 재고를 늘리고 싶을 때):
 --   ... psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v queue_schedules=10 \
 --       -f - < load-test/sql/04-enable-queue.sql
---   그러면 초당 입장 인원이 admit-batch-size x 10 이 된다는 것을 잊지 말 것.
+--   Task 037 전에는 그러면 초당 입장 인원이 admit-batch-size x 10 이 됐다. 지금은 전역
+--   예산이라 10회차를 켜도 admit-rate-per-second 그대로다 — 다만 위 2)번 왕복 비용은 늘고,
+--   id가 작은 회차가 예산을 먼저 먹으므로 **뒤쪽 회차는 굶는다**(알려진 편향. 스케줄러
+--   javadoc 참조). 다회차 군에서는 입장 속도 총합을 보고 회차별 분배는 보지 않는다.
 
 -- psql -v로 안 넘기면 10을 쓴다. :'name' 형식이 정의되지 않은 변수에서 깨지므로
 -- current_setting의 missing_ok로 받는다.
@@ -88,7 +96,9 @@ WHERE id IN (SELECT s.id
 --   load_enabled      : 켠 회차 수. 0이면 01~02 시드를 안 돌렸다
 --   dev_seed_enabled  : 0이 아니면 WHERE 절이 새서 e2e를 깨뜨릴 상태다
 --   schedule_ids      : 그대로 -e SCHEDULE_IDS=... 에 붙인다
---   admits_per_second : 초당 입장 인원. admit-batch-size가 회차당이라는 걸 눈에 보이게 한다
+--   admits_per_second : 초당 입장 인원. Task 037 전에는 켠 회차 수에 비례했고, 그걸 눈에
+--                       보이게 하려고 이 열을 뒀다. 지금은 **켠 회차 수와 무관하게
+--                       admit-rate-per-second 그대로**라, 이 열은 "전에는 이랬다"의 대조군이다
 SELECT count(*)                                        AS load_enabled,
        (SELECT count(*)
         FROM schedules s2
@@ -97,7 +107,8 @@ SELECT count(*)                                        AS load_enabled,
         WHERE v2.name <> '[LOAD] 부하테스트 아레나'
           AND s2.queue_enabled)                        AS dev_seed_enabled,
        string_agg(s.id::text, ',' ORDER BY s.id)       AS schedule_ids,
-       count(*) * 50                                   AS admits_per_second_at_batch_50
+       50                                              AS admits_per_second_at_rate_50,
+       count(*) * 50                                   AS before_t037_admits_per_second
 FROM schedules s
          JOIN performances p ON p.id = s.performance_id
          JOIN venues v ON v.id = p.venue_id
