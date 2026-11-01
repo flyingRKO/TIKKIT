@@ -32,6 +32,12 @@
 #   - Git Bash면 MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' 가 export돼 있다 (007 6절)
 #   - 반복 1회차는 **warmup으로 쓰고 버린다** (shared_buffers를 바꾼 군은 cold에서 출발한다).
 #     그래서 반복수 3을 주면 실제로 4번 돈다. 0회차 파일명에 -warmup이 붙는다.
+#
+# ★ 군 시작 전에 postgres를 재시작한다 (NO_PG_RESTART=1로 끈다) ★
+#   warmup은 **군 내부만** 데운다. 그래서 여러 군을 연달아 돌리면 뒤 군이 앞 군의 버퍼를
+#   물려받아 **순서 편향**이 생긴다 — 036의 1차 측정에서 A군 402.7 req/s vs **같은 설정의**
+#   D군 768.6 req/s로 **1.9배** 차이가 났다(014 4.7절). 040이 군마다 손으로 재시작해서
+#   피했는데, 손으로 하는 조치는 다음 사람이 빠뜨린다. 여기로 옮긴다.
 set -euo pipefail
 
 TAG="${1:?tag가 필요하다 (예: t040-b-sb128-s600)}"
@@ -54,6 +60,7 @@ case "$SCRIPT" in
   seatmap.js)       PROFILE=seatmap ;;
   browse*.js)       PROFILE=browse ;;
   booking-spike.js) PROFILE=booking ;;
+  queue-*.js)       PROFILE=queue ;;
   *)                PROFILE="" ;;
 esac
 
@@ -110,7 +117,26 @@ elif [ "$be1_toggles" != "$be2_toggles" ]; then
 fi
 
 echo "k6 인자: $*"
+
+# postgres를 재시작해 버퍼를 비운다. 군 사이 순서 편향을 없애는 장치다(위 주석 참조).
+# 끄는 이유가 있을 때만 NO_PG_RESTART=1 — 그때는 "앞 군의 버퍼를 물려받은 측정"이 된다.
+if [ "${NO_PG_RESTART:-0}" = "1" ]; then
+  echo "postgres 재시작: 건너뜀 (NO_PG_RESTART=1) — 군 사이 순서 편향이 남는다"
+else
+  echo -n "postgres 재시작... "
+  $COMPOSE restart postgres > /dev/null 2>&1
+  # 헬스체크가 통과할 때까지 기다린다. 바로 쿼리를 쏘면 연결이 거부되고, 그러면 아래
+  # current_setting 에코가 실패해 set -e가 스크립트를 죽인다.
+  for _ in $(seq 1 30); do
+    if $PSQL -c 'select 1' > /dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  echo "완료"
+fi
 echo
+
+FAILED_RUNS=""
+UNCHECKED_RUNS=""
 
 for i in $(seq 0 "$REPEAT"); do
   if [ "$i" -eq 0 ]; then
@@ -182,8 +208,36 @@ for i in $(seq 0 "$REPEAT"); do
     }' > "$RESULTS/${name}-nginx.txt" 2>&1 || true
   cat "$RESULTS/${name}-nginx.txt"
 
-  python load-test/check-run.py ${PROFILE:+--profile "$PROFILE"} "$RESULTS/${name}.json" | tee "$RESULTS/${name}-integrity.txt" || true
+  # 종료코드를 버리지 않는다. 전에 `|| true`로 삼켜서, 3회차가 전부 FAIL인 군도
+  # "=== 군 끝 ==="에 종료코드 0으로 끝났다 — 036에서 각 군 3회차가 전부 502인 것을
+  # **사후에 손으로** 찾은 자리다(014 4.7절). PIPESTATUS로 python의 코드를 꺼내 모은다.
+  set +e
+  python load-test/check-run.py ${PROFILE:+--profile "$PROFILE"} "$RESULTS/${name}.json"     | tee "$RESULTS/${name}-integrity.txt"
+  integrity_rc=${PIPESTATUS[0]}
+  set -e
+  # 1 = 무결성 위반(이 군의 수치는 못 쓴다) / 2 = 프로필 미지정으로 검사 안 됨.
+  # 둘을 섞으면 "검사 안 됨"이 "오염됨"으로 보여서 쓸 수 있는 군을 버리게 된다.
+  if [ "$integrity_rc" -eq 1 ]; then
+    FAILED_RUNS="${FAILED_RUNS}${name} "
+  elif [ "$integrity_rc" -eq 2 ]; then
+    UNCHECKED_RUNS="${UNCHECKED_RUNS}${name} "
+  fi
   echo
 done
 
 echo "=== 군 $TAG 끝. 결과: $RESULTS/${TAG}-* ==="
+
+# 군 전체의 판정. 한 회차라도 무결성에서 떨어지면 **이 군의 수치는 쓰지 않는다** —
+# 통과한 회차만 골라 쓰면 그게 교훈 1의 전형이 된다(붕괴한 실행이 지연을 좋게 만든다).
+if [ -n "${FAILED_RUNS// /}" ]; then
+  echo
+  echo "!! 무결성 실패 회차: $FAILED_RUNS"
+  echo "!! 이 군의 수치는 판정에 쓰지 않는다. -integrity.txt와 -nginx.txt를 먼저 읽는다."
+  exit 1
+fi
+if [ -n "${UNCHECKED_RUNS// /}" ]; then
+  echo
+  echo "!! 프로필 미지정으로 **검사되지 않은** 회차: $UNCHECKED_RUNS"
+  echo "!! \"통과\"가 아니라 \"검사 안 됨\"이다. check-run.py의 PROFILES에 이 시나리오를 넣는다."
+fi
+echo "무결성: 전 회차 통과"

@@ -63,14 +63,14 @@ npm run lint      # ESLint 검사
 npm start         # 프로덕션 서버 실행
 ```
 
-## 에이전트 안내
+## 에이전트·스킬 안내
 
-프론트엔드 전용 에이전트는 `.claude/agents/`에 있습니다:
-- `nextjs-app-developer`: Next.js 16 App Router 구조 설계 전문가
-- `ui-markup-specialist`: TailwindCSS + shadcn/ui 마크업 전문가
-- `starter-cleaner`: 스타터킷 초기화 전문가
+**프로젝트 전용 서브에이전트는 두지 않는다**(2026-11-01에 `nextjs-app-developer`·
+`ui-markup-specialist`·`starter-cleaner`를 지웠다 — 실사용 0). 이유는 루트 `CLAUDE.md`의
+「서브에이전트」 절에 있다.
 
-공통 에이전트는 루트 `TIKKIT/.claude/agents/`에서 상속됩니다.
+Next.js 16은 학습 데이터와 다르므로 **`AGENTS.md`가 요구하는 대로
+`node_modules/next/dist/docs/`의 해당 가이드를 먼저 읽는다.**
 
 ## 백엔드 연동
 
