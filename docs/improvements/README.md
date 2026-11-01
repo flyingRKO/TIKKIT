@@ -45,10 +45,14 @@
 | 좌석맵 포화 처리량 (`local`) | **±1.0%** (989.2~1009.3 req/s) | 11점 | 약 2% 이상 | [015](015-nginx-saturation.md) |
 | 예매 처리량 (저부하 closed model) | **±0.2%** (A군 3회 범위 0.08%) | 3회 | 약 1% 이상 | [010](010-waiting-queue.md) |
 | DB I/O (`blks_read`) | **±1.2%** | 9회 | 약 3% 이상 | [012](012-shared-buffers-retrial.md) |
-| Lighthouse FCP (Lantern, 홈·상세) | **0.2~0.4%** | 6회 | 약 1% 이상 | [016](016-local-tls-http2.md) |
+| Lighthouse FCP (Lantern, 데스크톱 홈·상세·좌석맵) | **0.2~0.4%** | 6회 | 약 1% 이상 | [016](016-local-tls-http2.md) · [018](018-fe-unmeasured-cases.md) |
+| Lighthouse FCP (Lantern, **모바일 홈**) | **94.4%** (1,054~2,402ms) | 6회 | **판정 불가** | [018](018-fe-unmeasured-cases.md) |
+| Lighthouse FCP (Lantern, 모바일 좌석맵) | **14.3%** (1,812~2,115ms) | 6회 | 약 29% 이상 | [018](018-fe-unmeasured-cases.md) |
 | Lighthouse FCP (루프백 무스로틀) | **32~55%** | 6회 | **판정 불가** | [016](016-local-tls-http2.md) |
 | 좌석맵 FCP (2,000석, 스로틀) | **0.6%** (490~493ms) | 6회 | 약 2% 이상 | [009_2](009_2-seatmap-structure.md) |
 | 좌석맵 FCP (루프백 무스로틀, 2,000 / 10,000석) | **45.9% / 55.2%** | 6회 | **판정 불가** | [009_2](009_2-seatmap-structure.md) |
+| 재방문 FCP (CDP 스로틀 desktop, 1·2차) | **3.7~13.0%** | 6회 | 약 26% 이상 | [018](018-fe-unmeasured-cases.md) |
+| 재방문 FCP (CDP 스로틀 mobile, 1·2차) | **1.0~7.0%** | 6회 | 약 14% 이상 | [018](018-fe-unmeasured-cases.md) |
 
 > **이 표도 교훈 6을 한 번 밟았다**(Task 041에서 정정). 위 두 행이 원래 `좌석맵 FCP (2,000석) | 25.2% | — | 판정 불가 | 009_2` 한 줄이었는데 **숫자는 009_1 것이고 출처로 적힌 009_2는 그 숫자를 부정한 문서**였다 — 009_2 3.6절이 같은 축을 **0.6%로 수렴**시키고(370ms 모드가 안 나왔다) 이중분포의 메커니즘을 **CLS**로 특정했다. 표본 칸도 비어 있었다.
 >
