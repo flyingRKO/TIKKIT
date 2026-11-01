@@ -121,7 +121,9 @@ Claude가 이 프로젝트에서 작업할 때 최우선으로 지켜야 할 4�
 명령어: `/git:branch`, `/git:commit`, `/git:merge`, `/git:pr`
 
 ### 문서 관리
-- 로드맵: `docs/ROADMAP.md`
+- 로드맵: `docs/ROADMAP.md` (진행 중·예정) / `docs/roadmap/archive-phase-0-9.md` (완료 Phase 전문)
+  - 2026-11-01에 분리했다 — ROADMAP이 약 124,000 토큰까지 자라서 한 번에 읽을 수 없게 됐고,
+    완료분이 그 71%였다. **완료 Task의 상세 근거는 원래부터 `docs/improvements/`가 정본이다**
 - 요구사항: `docs/PRD.md`
 - ERD: `docs/ERD.md`
 - 고도화 개선 기록(재현→해결→수치): `docs/improvements/`

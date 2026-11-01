@@ -22,7 +22,7 @@ Task 025는 여기에 Prometheus·Grafana를 얹고, Task 026은 BE 2개 + nginx
 쓰는 것, 그리고 springdoc 3.x의 `/swagger-ui.html` 기본 노출을 운영에서 끄는 것(ROADMAP:268).
 
 **완료 기준은 처음부터 "prod 이미지로 띄운 스택에서 Playwright e2e 3개 통과"로 잡혀 있었다**
-(ROADMAP:275). 이미지가 빌드되는 것과 그 이미지로 예매가 되는 것은 다른 얘기다.
+(ROADMAP Task 024. Phase 7은 `docs/roadmap/archive-phase-0-9.md`로 옮겼다). 이미지가 빌드되는 것과 그 이미지로 예매가 되는 것은 다른 얘기다.
 
 ## 2. 측정 환경
 
@@ -159,7 +159,7 @@ $ docker inspect t --format '{{.State.ExitCode}}'
 
 ### 4.4 .next/static 복사를 빼먹으면 화면은 뜨고 스타일만 사라진다
 
-ROADMAP:275가 "`output: 'standalone'`의 정적 파일 복사 누락"을 미리 경고해뒀는데, 실제 증상을
+ROADMAP Task 024가 "`output: 'standalone'`의 정적 파일 복사 누락"을 미리 경고해뒀는데, 실제 증상을
 명령 하나로 재현했다.
 
 ```

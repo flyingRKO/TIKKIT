@@ -1,6 +1,6 @@
 ---
 description: 'ROADMAP.md에서 완료된 작업을 체크하고 진행 상황을 업데이트합니다'
-allowed-tools: ['Read(docs/ROADMAP.md:*)', 'Edit(docs/ROADMAP.md:*)']
+allowed-tools: ['Read(docs/ROADMAP.md:*)', 'Edit(docs/ROADMAP.md:*)', 'Read(docs/roadmap/*)']
 ---
 
 # Claude 명령어: Update Roadmap
@@ -78,10 +78,16 @@ allowed-tools: ['Read(docs/ROADMAP.md:*)', 'Edit(docs/ROADMAP.md:*)']
 ### 진행 상황 계산
 
 ```
-전체 Task 수: ROADMAP.md 안의 `- **Task ` 패턴 개수를 세어 계산 (하드코딩 금지)
-완료 Task: ✅ 표시가 있는 Task 개수
+전체 Task 수: ROADMAP.md + docs/roadmap/archive-phase-0-9.md 두 파일의
+             `- **Task ` 패턴 개수 합 (하드코딩 금지)
+완료 Task: ✅ 표시가 있는 Task 개수 (아카이브는 전부 완료다)
 진행률: (완료 Task / 전체 Task) * 100
 ```
+
+> **완료 Phase는 `docs/roadmap/archive-phase-0-9.md`에 있다.** 2026-11-01에 분리했다 —
+> ROADMAP.md가 약 124,000 토큰까지 자라서 한 번에 읽을 수 없게 됐고 완료분이 그 71%였다.
+> 그래서 **Task 수를 셀 때 두 파일을 다 봐야 한다.** 아카이브는 완료 기록이라
+> 수정하지 않는다(Phase 0~9 내용이 바뀌는 일은 없다). 체크 대상은 ROADMAP.md뿐이다.
 
 ## 예시
 

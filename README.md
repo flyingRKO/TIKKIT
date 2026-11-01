@@ -36,7 +36,8 @@ API 응답 형식(`remainingQuantity`)을 좌석 AVAILABLE 건수로 파생시�
 |---|---|
 | [`docs/PRD.md`](docs/PRD.md) | MVP 요구사항, 기능 명세, API 계약 |
 | [`docs/ERD.md`](docs/ERD.md) | DB 스키마, 정규화·동시성·마이그레이션 설계 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0~10, Task 001~034 개발 로드맵 |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 진행 중·예정 로드맵 (Phase 10~14, Task 034~052) |
+| [`docs/roadmap/archive-phase-0-9.md`](docs/roadmap/archive-phase-0-9.md) | 완료 Phase 전문 기록 (Phase 0~9, Task 001~033) |
 
 ## 기술 스택
 
