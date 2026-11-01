@@ -90,6 +90,25 @@ const CHROME_FLAGS = ["--headless=new", "--no-sandbox", "--disable-gpu"]
  */
 const EXPECT_PROTOCOL = (process.env.LH_EXPECT_PROTOCOL ?? "").trim();
 
+/**
+ * 측정 프리셋. `desktop`(기본) | `mobile` (Task 041).
+ *
+ * 왜 환경변수가 필요했나: 전에는 `--preset=desktop`이 아래 고정 인자에 박혀 있어서
+ * **모바일로 잴 방법이 없었다.** 009·009_1·009_2·016이 네 문서 연속으로 "모바일을 안 쟀다"를
+ * 한계로 남긴 이유의 절반이 이것이다(나머지 절반은 n=1이라 산포가 없는 것).
+ *
+ * `mobile`이면 `--preset` 플래그를 **아예 빼서** lighthouse 기본값(모바일)으로 간다.
+ * `LH_EXTRA_FLAGS`로 `--form-factor=mobile` 같은 걸 덧붙이는 우회는 쓰지 않는다 —
+ * "desktop preset + 모바일 플래그"가 섞인 채 로그에 남아서, 나중에 그 회차가 어느
+ * 조건이었는지 읽을 수 없게 된다 (007·008이 계속 부딪힌 것).
+ */
+const PRESET = (process.env.LH_PRESET ?? "desktop").trim().toLowerCase();
+if (PRESET !== "desktop" && PRESET !== "mobile") {
+  throw new Error(`LH_PRESET은 desktop 또는 mobile이어야 한다. 받은 값: ${PRESET}`);
+}
+/** 리포트에서 확인할 기대 formFactor. 지금은 프리셋 이름과 같지만 의미가 다르다. */
+const EXPECT_FORM_FACTOR = PRESET;
+
 /** 산포가 이 값을 넘으면 수치를 쓰되 "판단 불가"로 표시한다 (008의 규율). */
 const UNRELIABLE_SPREAD = 0.2;
 /** 문서 본문이 기대값에서 이 비율 이상 벗어나면 그 회차를 오염으로 본다. */
@@ -158,7 +177,8 @@ function runLighthouse(url, outPath) {
     [
       LIGHTHOUSE_CLI,
       url,
-      "--preset=desktop",
+      // PRESET이 mobile이면 이 플래그를 빼서 lighthouse 기본값(모바일)으로 간다.
+      ...(PRESET === "desktop" ? ["--preset=desktop"] : []),
       "--only-categories=performance",
       "--output=json",
       `--output-path=${outPath}`,
@@ -213,7 +233,17 @@ function extract(report) {
     protocols.set(protocol, (protocols.get(protocol) ?? 0) + 1);
   }
 
+  // 적용된 측정 조건을 리포트에서 직접 꺼낸다. **환경변수를 넘긴 것과 lighthouse가 그
+  // 조건으로 잰 것은 다르다** — 016 7절이 세션 쿠키 `secure`에서 밟은 자리다(e2e 통과만으로는
+  // Next가 `process.env`를 빌드 시점에 인라인했는지 알 수 없어서 쿠키를 직접 읽어야 했다).
+  // 교훈 10의 적용이고, 아래 오염 판정이 이 값을 쓴다.
+  const settings = report.configSettings ?? {};
+  const throttling = settings.throttling ?? {};
+
   return {
+    formFactor: settings.formFactor ?? "(없음)",
+    throughputKbps: throttling.throughputKbps ?? Number.NaN,
+    cpuSlowdown: throttling.cpuSlowdownMultiplier ?? Number.NaN,
     score: Math.round((report.categories.performance.score ?? 0) * 100),
     fcp: numeric("first-contentful-paint"),
     lcp: numeric("largest-contentful-paint"),
@@ -257,6 +287,11 @@ if (EXTRA_FLAGS.length > 0) {
 // chrome 플래그도 같은 이유로 찍는다. 전에는 고정 문자열이라 찍을 이유가 없었는데
 // LH_CHROME_EXTRA로 바뀔 수 있게 된 뒤로는 측정 조건의 일부다 (Task 039_1).
 console.log(`  chrome 플래그: ${CHROME_FLAGS}`);
+// 프리셋은 측정 조건 중 수치를 가장 크게 바꾸는 손잡이다(모바일은 CPU ×4 + 1,638.4kbps).
+console.log(
+  `  프리셋: ${PRESET}` +
+    (PRESET === "mobile" ? " (--preset 플래그를 빼서 lighthouse 기본값으로 간다)" : "")
+);
 if (EXPECT_PROTOCOL === "") {
   console.log("  LH_EXPECT_PROTOCOL이 없다. 프로토콜 검사를 건너뛴다 (첫 측정이면 정상).");
 } else {
@@ -288,13 +323,23 @@ for (let i = 1; i <= runs; i += 1) {
     EXPECT_PROTOCOL === ""
       ? []
       : sample.protocols.filter((entry) => entry.protocol !== EXPECT_PROTOCOL);
+  // 프리셋이 실제로 걸렸는지 본다. 안 걸리면 **경고 하나 없이 데스크톱 수치가 나오고**
+  // 지연·바이트·점수가 전부 정상으로 보인다 — LH_EXPECT_PROTOCOL이 h2에 대해 막는 것과
+  // 같은 종류의 사고다 (교훈 10).
+  const formFactorOff = sample.formFactor !== EXPECT_FORM_FACTOR;
+
+  // 사유를 배열로 모은다. 전에는 3중 삼항이라 **두 개가 동시에 틀려도 하나만 보였다** —
+  // 조건이 둘 어긋난 회차와 하나 어긋난 회차를 구분할 수 없었다.
+  const reasons = [];
+  if (bytesOff) reasons.push("문서 바이트");
+  if (offProtocol.length > 0) {
+    reasons.push(`프로토콜(${offProtocol.map((e) => `${e.protocol}×${e.count}`).join(", ")})`);
+  }
+  if (formFactorOff) reasons.push(`프리셋(${sample.formFactor} != ${EXPECT_FORM_FACTOR})`);
+
   sample.protocolOff = offProtocol;
-  sample.contaminated = bytesOff || offProtocol.length > 0;
-  sample.reason = bytesOff
-    ? "문서 바이트"
-    : offProtocol.length > 0
-      ? `프로토콜(${offProtocol.map((e) => `${e.protocol}×${e.count}`).join(", ")})`
-      : "";
+  sample.contaminated = reasons.length > 0;
+  sample.reason = reasons.join(" + ");
 
   samples.push(sample);
   console.log(
@@ -332,6 +377,14 @@ if (clean.length === 0) {
 if (clean.length < samples.length) {
   console.log(`\n오염 ${samples.length - clean.length}회를 집계에서 제외했다.`);
 }
+
+// 적용된 조건을 수치로 남긴다. 009 4.3절의 mobile 반례가 **"1,638.4kbps라 같은 폰트에 약
+// 9.8초가 필요한데 FCP가 914ms"** 라는 계산에 걸려 있어서, 그 반례를 다시 보려면 분모가
+// 실제로 그 값이었는지가 기록에 남아 있어야 한다.
+console.log(
+  `\n적용된 측정 조건: formFactor ${clean[0].formFactor}` +
+    ` / ${clean[0].throughputKbps}kbps / CPU ×${clean[0].cpuSlowdown}`
+);
 
 const metrics = [
   ["FCP", (sample) => sample.fcp],
