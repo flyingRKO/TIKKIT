@@ -4,16 +4,12 @@
       "type": "http",
       "url": "https://mcp.context7.com/mcp"
     },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
     "postgres": {
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-postgres",
-        "postgresql://<user>:<password>@localhost:5432/<database>"
+        "postgresql://<DB_USERNAME>:<DB_PASSWORD>@localhost:5432/tikkit_db"
       ]
     }
   }

@@ -26,40 +26,40 @@ TIKKIT/
 - **Database**: PostgreSQL 15 (Docker)
 - **상세 가이드**: `@/tikkit-back/CLAUDE.md` 참조
 
-## 에이전트 구조 안내
+## 서브에이전트 — 프로젝트 전용은 두지 않는다
 
-이 루트 디렉토리의 에이전트는 **FE/BE 공통**으로 사용됩니다.
+**2026-11-01에 프로젝트 에이전트 9개를 전부 지웠다.** 실사용이 0이었다.
 
-| 에이전트 | 용도 |
-|---------|-----|
-| `code-reviewer` | Java + TypeScript 코드 리뷰 |
-| `prd-generator` | 제품 요구사항 문서 작성 |
-| `prd-validator` | PRD 기술 검증 |
-| `development-planner` | 풀스택 로드맵 작성 |
+- `prd-generator`·`prd-validator`는 Phase 0에서, `starter-cleaner`는 Task 003에서 역할이 끝났다
+- `development-planner`는 로드맵 생성기인데 **템플릿이 현 구조를 모른다**(아카이브 분리 이후)
+- `code-reviewer`는 내장 `/code-review`와 중복이고 그쪽이 `ultra`까지 있다
+- `spring-boot-developer`·`api-designer`·`nextjs-app-developer`·`ui-markup-specialist`는
+  "전문가" 역할 에이전트인데, **서브에이전트는 대화 컨텍스트를 물려받지 못한다** —
+  브리핑에 적은 것만 안다. 그래서 같은 작업을 직접 하는 쪽이 빠르고 정확했다
 
-**FE 전용 에이전트**는 `tikkit-front/.claude/agents/`에 있습니다.
-**BE 전용 에이전트**는 `tikkit-back/.claude/agents/`에 있습니다.
+**대신 쓰는 것**: 내장 `Explore`(넓게 훑어 결론만 받을 때), `Plan`, `general-purpose`.
+파일 여러 개를 읽어야 답이 나오는 조사는 `Explore`에 맡기고 결론만 받는다.
+되살리고 싶으면 `git log -- .claude/agents`에서 꺼낸다.
 
 ## 스킬 안내
 
-`.claude/skills/`에 설치된 스킬입니다. FE/BE 공통으로 보입니다.
+`.claude/skills/`에 설치된 스킬이다. FE/BE 공통으로 보인다.
 
 | 스킬 | 용도 | TIKKIT에서 |
 |-----|-----|----------|
 | `search-first` | 코드 짜기 전에 npm/PyPI/MCP/GitHub에 이미 있는 해법을 먼저 검색 → 채택/확장/직접구현 결정 | FE/BE 공통. 새 기능·의존성 추가 전에 사용 |
 | `ui-ux-pro-max` | UI/UX 설계 지식 DB 검색 (스타일 79종, 팔레트 192종, 폰트 조합 74종, UX 가이드라인 119개) | `tikkit-front` 화면 설계·접근성 점검 |
-| `ui-styling` | shadcn/ui + Tailwind 컴포넌트 구현 | `tikkit-front` (TailwindCSS v4) |
-| `design-system` | 디자인 토큰 3계층(primitive→semantic→component), CSS 변수 | `tikkit-front` 토큰 정리 시 |
-| `design` | 브랜드 아이덴티티·로고 생성 통합 스킬 | 당장 쓸 일 없음 |
-| `brand` | 브랜드 보이스·메시징 프레임워크 | 당장 쓸 일 없음 |
-| `banner-design` | 소셜/광고 배너 디자인 | 당장 쓸 일 없음 |
-| `slides` | Chart.js 기반 HTML 프레젠테이션 | 당장 쓸 일 없음 |
 
-`design`~`slides` 4개는 `ui-ux-pro-max` 설치 시 번들로 같이 깔린 것이다. 요청해서 받은 게 아니라 딸려온 것이므로, 필요 없다고 판단되면 폴더째 지워도 된다.
+**BE 전용 스킬**은 `tikkit-back/.claude/skills/`에 있다 — `db-design`(스키마·마이그레이션),
+`test-writing`(서비스·리포지토리·통합 테스트).
+
+**2026-11-01에 스킬 6개를 지웠다** — `design`·`brand`·`banner-design`·`slides`(`ui-ux-pro-max`
+설치 시 번들로 딸려온 것)와 `ui-styling`·`design-system`(화면·토큰 작업이 Task 003·023에서
+끝났다). 합계 980KB다. 필요해지면 `git log -- .claude/skills`에서 꺼내거나 다시 설치한다.
 
 ### Python 의존성
 
-`ui-ux-pro-max`, `design-system` 등은 CSV 데이터를 `scripts/search.py`로 검색한다.
+`ui-ux-pro-max`는 CSV 데이터를 `scripts/search.py`로 검색한다.
 **Python 3.13.15 설치됨** (2026-10-21, `winget install Python.Python.3.13`).
 설치 경로는 `C:\Users\wogns\AppData\Local\Programs\Python\Python313`이고, 사용자 PATH에서 `WindowsApps` 앞에 등록되어 있다.
 
@@ -72,7 +72,6 @@ python --version                                              # Python 3.13.15
 cd .claude/skills/ui-ux-pro-max
 python scripts/validate_data.py                               # OK: validated 12 domain files, 22 stack files
 python scripts/search.py "<query>" --domain style -n 3        # 도메인 검색
-python scripts/search.py "<query>" --design-system -p "TIKKIT" # 디자인 시스템 추천
 ```
 
 Windows에서는 `python3`이 아니라 `python`을 쓴다 (SKILL.md 본문은 `python3` 기준으로 적혀 있다).
@@ -126,11 +125,38 @@ Claude가 이 프로젝트에서 작업할 때 최우선으로 지켜야 할 4�
     완료분이 그 71%였다. **완료 Task의 상세 근거는 원래부터 `docs/improvements/`가 정본이다**
 - 요구사항: `docs/PRD.md`
 - ERD: `docs/ERD.md`
-- 고도화 개선 기록(재현→해결→수치): `docs/improvements/`
+- 고도화 개선 기록(재현→해결→수치): `docs/improvements/` — **측정 수치의 정본은 항상 여기다**
+  - `CLAUDE.md`에는 **"지금 어떻게 동작하나 + 밟으면 안 되는 함정"** 만 적고, **"그때 몇이 나왔나"는
+    링크로 보낸다.** 수치를 복사하면 사본이 생기고, 사본은 낡는다 — `010`의 `evicted_keys` 9,999를
+    "세션 9,999개"로 읽은 오류가 `010 요약 → ROADMAP → tikkit-back/CLAUDE.md`로 퍼진 채
+    한동안 살아 있었다(Task 037에서 정정). 교훈 6·9가 그 얘기다
+  - 축별 산포(노이즈 플로어)는 `docs/improvements/README.md`의 「축별 산포」 표에 모은다.
+    **측정을 계획할 때 그 표를 먼저 본다** — 예상 효과가 산포보다 작으면 결과가 돌리기 전에 정해져 있다
 - 로드맵 업데이트: `/docs:update-roadmap`
 
 ### 환경 설정
-- Slack 훅을 사용하려면 루트에 `.env` 파일 생성 후 `SLACK_WEBHOOK_URL` 설정
+
+**MCP 서버**는 `.mcp.json`으로 설정한다. **이 파일은 gitignore 대상이다** — `postgres` 서버
+항목에 DB 접속 문자열이 평문으로 들어가기 때문이다. 새 기계에서는 `.mcp.json.example`을
+복사해 자격증명을 채운다.
+
+| 서버 | 쓰는 곳 | 실사용(트랜스크립트 39개) |
+|---|---|---|
+| `context7` | 라이브러리 문서. Boot 4 / Next 16처럼 학습 데이터보다 새 버전에서 값이 있다 | 9회 |
+| `postgres` | 스키마·데이터 즉석 조회 | 6회 |
+
+`sequential-thinking`은 **0회**라 `.mcp.json.example`에서 빼뒀다 — 모델 자체 추론과 중복이다.
+쓰던 `.mcp.json`에 남아 있으면 지워도 된다.
+
+**Claude Code 설정**은 두 파일로 나뉜다.
+
+- `.claude/settings.json` — 버전관리된다. 공유 가능한 read-only 권한만 둔다
+- `.claude/settings.local.json` — gitignore. 기계별 설정(훅·`additionalDirectories`·
+  `outputStyle`)과 변경성 명령 허용을 둔다
+
+**Slack 훅**: 루트 `.env`에 `SLACK_WEBHOOK_URL`을 설정한다. 단 현재 `settings.local.json`에
+`Notification` 훅이 등록돼 있지 않아 **연결된 곳이 없다** — 쓰려면 훅 스크립트를 다시 만들고
+등록해야 한다(2026-11-01에 미등록 `notification-hook.sh`를 지웠다).
 
 ## 로컬 개발 환경
 
