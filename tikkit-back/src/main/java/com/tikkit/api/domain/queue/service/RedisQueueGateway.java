@@ -170,9 +170,20 @@ public class RedisQueueGateway implements QueueGateway {
      * 재진입하면 깨지므로, 그때는 프론트가 "순번이 초기화됐다"를 명시해야 한다.
      * <p>
      * {@code rank}가 0이면 0초가 나온다. 프론트는 이걸 "곧 입장"으로 표시한다.
+     * <p>
+     * <b>Task 037에서 분모가 역산에서 설정값 그 자체로 바뀌었다.</b> 전에는
+     * {@code admitBatchSize / admitInterval}로 계산했는데, 그 분모가 회차당 값이라
+     * <b>회차 2개를 켜면 실제 입장 속도는 2배인데 ETA는 그대로였다</b> — 표시보다 빨리
+     * 입장하는 방향이라 사용자에게는 안전했지만 ETA가 틀린 것은 맞다. 이제
+     * {@code admit-rate-per-second}가 전역 속도라 켠 회차 수와 무관하게 맞는다.
+     * <p>
+     * {@code Math.ceilDiv}를 쓰는 이유: 분모가 {@code int}가 되면서
+     * {@code Math.ceil(rank / rate)}는 <b>정수 나눗셈이 먼저 잘려서 ceil이 아무 일도 하지
+     * 않는다</b>(rank 1, rate 50이면 0초 — "곧 입장"으로 표시된다). 조용히 틀리는 종류라
+     * {@code QueueOrderingTest}가 경계를 고정한다.
      */
     private long estimatedWaitSeconds(long rank) {
-        return (long) Math.ceil(rank / properties.admitRatePerSecond());
+        return Math.ceilDiv(rank, properties.admitRatePerSecond());
     }
 
     private long pollAfterSeconds(long rank) {

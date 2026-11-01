@@ -39,7 +39,8 @@ const MAX_VUS = Number(__ENV.MAX_VUS || 300);
 
 // 진입/폴링 응답에서 입장한 비율. 대기열의 핵심 지표다 —
 // 이 값이 낮으면서 좌석 API p95가 멀쩡하면 대기열이 제 역할을 한 것이고,
-// 이 값이 높으면 입장 속도(admit-batch-size x 켠 회차 수)가 아직 크다는 뜻이다.
+// 이 값이 높으면 입장 속도(admit-rate-per-second — Task 037부터 켠 회차 수와 무관하다)가
+// 아직 크다는 뜻이다.
 const admitted = new Rate('tikkit_queue_admitted');
 
 // 백엔드가 지시한 다음 폴링 간격. 어느 구간(2/5/10초)을 실제로 밟았는지가

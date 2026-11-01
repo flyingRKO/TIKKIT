@@ -84,7 +84,7 @@ $PSQL -c "select current_setting('shared_buffers') shared_buffers, current_setti
 # BE 2대를 따로 찍는 이유: 둘이 같은 anchor(*backend-env)를 쓰므로 보통은 같지만,
 # **한쪽만 재생성하면 조건이 갈린다.** 갈린 상태로 재면 그 군은 두 설정의 평균이 되고,
 # 측정 중에는 그걸 알 방법이 없다.
-TOGGLE_KEYS='^(SEATMAP_STRATEGY|SEATMAP_MAX_ENTRIES|CACHE_TYPE|QUEUE_ENABLED)='
+TOGGLE_KEYS='^(SEATMAP_STRATEGY|SEATMAP_MAX_ENTRIES|CACHE_TYPE|QUEUE_ENABLED|QUEUE_ADMIT_RATE_PER_SECOND)='
 
 toggles_of() {
   cid="$($COMPOSE ps -q "$1" 2>/dev/null | head -1)"

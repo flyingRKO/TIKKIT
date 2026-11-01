@@ -80,8 +80,8 @@ class QueueOrderingTest extends AbstractRedisQueueContainerTest {
 
         queueAdmissionScheduler.run();
 
-        // ADMIT_BATCH_SIZE(3)명이 입장한다.
-        for (int i = 0; i < ADMIT_BATCH_SIZE; i++) {
+        // ADMIT_RATE_PER_SECOND(3)명이 입장한다.
+        for (int i = 0; i < ADMIT_RATE_PER_SECOND; i++) {
             QueueStatusResponse admitted = queueGateway.status(scheduleId, memberIdOf(sessions.get(i)));
             assertThat(admitted.state()).isEqualTo(QueueState.ADMITTED);
             assertThat(admitted.passExpiresAt()).isNotNull();
@@ -92,7 +92,7 @@ class QueueOrderingTest extends AbstractRedisQueueContainerTest {
         QueueStatusResponse stillWaiting = queueGateway.status(scheduleId, memberIdOf(sessions.get(3)));
         assertThat(stillWaiting.state()).isEqualTo(QueueState.WAITING);
         assertThat(stillWaiting.position()).isEqualTo(1);
-        assertThat(stillWaiting.totalWaiting()).isEqualTo(sessions.size() - ADMIT_BATCH_SIZE);
+        assertThat(stillWaiting.totalWaiting()).isEqualTo(sessions.size() - ADMIT_RATE_PER_SECOND);
     }
 
     @Test
@@ -115,12 +115,20 @@ class QueueOrderingTest extends AbstractRedisQueueContainerTest {
     void 예상_대기시간은_순번을_입장_속도로_나눈_값이다() {
         sessions.forEach(session -> queueGateway.enter(scheduleId, memberIdOf(session)));
 
-        // admit-batch-size=3, admit-interval=1s(기본) → 초당 3명.
-        // rank 0 → 0초, rank 4 → ceil(4/3) = 2초.
+        // admit-rate-per-second=3 → 초당 3명. 틱 간격은 상수 1s다.
+        // rank 0 → 0초, rank 4 → ceilDiv(4, 3) = 2초.
         assertThat(queueGateway.status(scheduleId, memberIdOf(sessions.get(0))).estimatedWaitSeconds())
                 .isZero();
         assertThat(queueGateway.status(scheduleId, memberIdOf(sessions.get(4))).estimatedWaitSeconds())
                 .isEqualTo(2);
+
+        // rank 1 ~ 2는 **1초로 올라가야 한다.** 분모가 Task 037에서 int가 되면서
+        // Math.ceil(rank / rate)는 정수 나눗셈이 먼저 잘려 ceil이 아무 일도 하지 않는다
+        // (1/3 = 0 → "곧 입장"). 올림을 ceilDiv로 옮긴 것을 이 두 줄이 고정한다.
+        assertThat(queueGateway.status(scheduleId, memberIdOf(sessions.get(1))).estimatedWaitSeconds())
+                .isEqualTo(1);
+        assertThat(queueGateway.status(scheduleId, memberIdOf(sessions.get(2))).estimatedWaitSeconds())
+                .isEqualTo(1);
     }
 
     @Test

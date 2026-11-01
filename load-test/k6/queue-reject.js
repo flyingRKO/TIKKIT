@@ -13,7 +13,17 @@
 // 지표를 보는 쪽이 확실하다 — hikaricp_connections_acquire_seconds_count의 증가분이다.
 //
 // ── 측정이 성립하는 조건 ────────────────────────────────────────────────────
-// 1) QUEUE_ADMIT_BATCH_SIZE=0  — 아무도 입장하지 않는다(peekWaiting이 count<=0을 막아준다).
+// 1) 아무도 입장하지 않는다 — **이 스크립트가 대기열에 줄을 서지 않기 때문이다.**
+//    VU는 POST /reservations만 때리고 POST /queue/schedules/{id}/entries를 부르지 않으므로
+//    waiting ZSET이 비어 있고, 입장 배치는 꺼낼 후보가 없다.
+//
+//    ★ 전에 이 자리가 "QUEUE_ADMIT_BATCH_SIZE=0 — peekWaiting이 count<=0을 막아준다"로
+//      적고 있었는데 **메커니즘이 두 가지로 틀렸다**(Task 037에서 확인했다):
+//      ① QueueProperties의 compact constructor가 `<= 0`을 기본값 50으로 보정하므로 0을
+//         넘겨도 peekWaiting은 count=50을 받는다. 설정으로 입장을 멈출 수 없다
+//      ② 애초에 막아야 할 후보가 없다(위 설명). 즉 환경변수는 이 측정에 무관하다
+//      결과는 맞았고 이유가 틀린 경우다 — 조건 3의 403 비율이 실제 그물이었다.
+//      그래서 이 군에는 입장 속도 환경변수를 넘기지 않는다.
 //    하나라도 입장하면 그 사람은 정상 경로로 DB를 쓰고, 그게 증가분에 섞인다.
 // 2) 회차 플래그 on + QUEUE_ENABLED=true
 // 3) 전부 403이어야 한다. 201이 섞이면 1)이 깨진 것이다.

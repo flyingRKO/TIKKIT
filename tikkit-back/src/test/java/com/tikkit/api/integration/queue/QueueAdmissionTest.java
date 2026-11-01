@@ -49,17 +49,17 @@ class QueueAdmissionTest extends AbstractRedisQueueContainerTest {
      * 건너뛰어진다"는 주석이 있었는데 Task 031에서 틀렸음을 확인하고 지웠다.
      */
     @Test
-    @DisplayName("한 틱에 정확히 admit-batch-size만큼 입장하고, 남은 인원은 다음 틱으로 넘어간다")
+    @DisplayName("한 틱에 정확히 admit-rate-per-second만큼 입장하고, 남은 인원은 다음 틱으로 넘어간다")
     void 한_틱에_배치_크기만큼_입장한다() {
         sessions.forEach(session -> queueGateway.enter(scheduleId, memberIdOf(session)));
         assertThat(queueRepository.waitingSize(scheduleId)).isEqualTo(7);
 
         queueAdmissionScheduler.run();
-        assertThat(queueRepository.activeSize(scheduleId)).isEqualTo(ADMIT_BATCH_SIZE);
-        assertThat(queueRepository.waitingSize(scheduleId)).isEqualTo(7 - ADMIT_BATCH_SIZE);
+        assertThat(queueRepository.activeSize(scheduleId)).isEqualTo(ADMIT_RATE_PER_SECOND);
+        assertThat(queueRepository.waitingSize(scheduleId)).isEqualTo(7 - ADMIT_RATE_PER_SECOND);
 
         queueAdmissionScheduler.run();
-        assertThat(queueRepository.activeSize(scheduleId)).isEqualTo(ADMIT_BATCH_SIZE * 2);
+        assertThat(queueRepository.activeSize(scheduleId)).isEqualTo(ADMIT_RATE_PER_SECOND * 2);
 
         // 남은 인원이 배치 크기보다 적으면 있는 만큼만 입장한다.
         queueAdmissionScheduler.run();
@@ -120,7 +120,7 @@ class QueueAdmissionTest extends AbstractRedisQueueContainerTest {
 
         queueAdmissionScheduler.run();
 
-        assertThat(admittedCount() - before).isEqualTo(ADMIT_BATCH_SIZE);
+        assertThat(admittedCount() - before).isEqualTo(ADMIT_RATE_PER_SECOND);
     }
 
     @Test
@@ -130,8 +130,8 @@ class QueueAdmissionTest extends AbstractRedisQueueContainerTest {
 
         queueAdmissionScheduler.run();
 
-        // 7명 중 ADMIT_BATCH_SIZE명이 입장했으므로 남은 대기 인원이 게이지에 들어간다.
-        assertThat(waitingSizeGauge()).isEqualTo(7 - ADMIT_BATCH_SIZE);
+        // 7명 중 ADMIT_RATE_PER_SECOND명이 입장했으므로 남은 대기 인원이 게이지에 들어간다.
+        assertThat(waitingSizeGauge()).isEqualTo(7 - ADMIT_RATE_PER_SECOND);
     }
 
     @Test

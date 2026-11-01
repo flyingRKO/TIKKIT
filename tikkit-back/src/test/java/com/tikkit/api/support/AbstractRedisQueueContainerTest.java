@@ -82,7 +82,7 @@ public abstract class AbstractRedisQueueContainerTest extends AbstractConcurrenc
         registry.add("tikkit.queue.enabled", () -> "true");
         // 입장 인원을 작게 둔다. 테스트는 "1틱에 정확히 N명"을 세는데 기본값 50이면
         // 픽스처를 51명 만들어야 경계를 볼 수 있다.
-        registry.add("tikkit.queue.admit-batch-size", () -> ADMIT_BATCH_SIZE);
+        registry.add("tikkit.queue.admit-rate-per-second", () -> ADMIT_RATE_PER_SECOND);
         // 플래그 스냅샷을 짧게. 이 값에 기대지 않고 invalidate()로 강제하지만, 테스트가
         // 늦게 켠 플래그도 결국 따라오게 해 둔다.
         registry.add("tikkit.queue.flag-cache-ttl", () -> "1s");
@@ -91,8 +91,14 @@ public abstract class AbstractRedisQueueContainerTest extends AbstractConcurrenc
                 () -> "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(REDIS_PORT));
     }
 
-    /** 한 틱에 입장시킬 인원. {@code QueueAdmissionTest}가 경계를 이 값으로 계산한다. */
-    protected static final int ADMIT_BATCH_SIZE = 3;
+    /**
+     * <b>전역</b> 초당 입장 인원. 틱 간격이 1초이므로 "한 틱에 입장시킬 총 인원"과 같은 수다.
+     * {@code QueueAdmissionTest}가 경계를 이 값으로 계산한다.
+     * <p>
+     * Task 037 전에는 이 값이 <b>회차당</b>이었다 — 회차를 2개 켜면 틱당 6명이 들어갔다.
+     * 지금은 켠 회차가 몇 개여도 틱당 3명이고, {@code QueueAdmissionTest}가 그걸 고정한다.
+     */
+    protected static final int ADMIT_RATE_PER_SECOND = 3;
 
     @Autowired
     protected WaitingQueueRedisRepository queueRepository;
